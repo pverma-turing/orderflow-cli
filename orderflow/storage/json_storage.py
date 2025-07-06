@@ -168,3 +168,48 @@ class JsonStorage(Storage):
 
         print(f"Order with ID '{order_id}' not found.")
         return None
+
+    def get_orders_by_ids(self, order_ids):
+        """Retrieve multiple orders by their IDs efficiently"""
+        if not order_ids:
+            return []
+
+        # Create a dictionary for faster lookup by ID
+        orders_dict = {}
+
+        # Get all orders data
+        orders_data = self._read_all()
+
+        # First pass: Build a dictionary of orders by ID
+        for order_data in orders_data:
+            order_id = order_data.get('order_id')
+            if order_id in order_ids:
+                try:
+                    orders_dict[order_id] = Order.from_dict(order_data)
+                except (ValueError, Exception) as e:
+                    print(f"Warning: Error parsing order with ID {order_id}: {str(e)}")
+
+        # Return orders in the same order as the input IDs
+        return [orders_dict.get(order_id) for order_id in order_ids]
+
+    def save_orders_batch(self, orders):
+        """Save multiple orders in a single operation for efficiency"""
+        if not orders:
+            return []
+
+        # Read all existing orders
+        all_orders_data = self._read_all()
+        all_orders_dict = {order_data.get('order_id'): order_data for order_data in all_orders_data}
+
+        # Update or add each order
+        saved_orders = []
+        for order in orders:
+            order_dict = order.to_dict()
+            all_orders_dict[order.order_id] = order_dict
+            saved_orders.append(order)
+
+        # Write back all orders
+        if self._write_all(list(all_orders_dict.values())):
+            return saved_orders
+
+        return []
