@@ -1,11 +1,11 @@
 from orderflow.commands.base import Command
 from tabulate import tabulate
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from collections import Counter
 
 
 class ViewCommand(Command):
-    """Command to view all orders with filtering and statistics options"""
+    """Command to view all orders with comprehensive filtering and reporting options"""
 
     VALID_STATUSES = ["new", "preparing", "delivered", "canceled"]
     DATE_FORMAT = "%Y-%m-%d"
@@ -30,6 +30,16 @@ class ViewCommand(Command):
         parser.add_argument('--to-date', help='Show orders until this date (YYYY-MM-DD format)')
         parser.add_argument('--today', action='store_true', help='Show only today\'s orders')
 
+        # New - Content filtering
+        parser.add_argument('--dish', help='Filter by dish name (partial matches allowed)')
+        parser.add_argument('--customer', help='Filter by customer name (partial matches allowed)')
+
+        # New - Summary reports
+        parser.add_argument('--top-dishes', action='store_true',
+                            help='Display the top 5 most ordered dishes')
+        parser.add_argument('--top-customers', action='store_true',
+                            help='Display the top 5 customers by number of orders')
+
     def execute(self, args):
         # Get all orders
         orders = self.storage.get_orders()
@@ -37,12 +47,31 @@ class ViewCommand(Command):
         # Apply filters
         filtered_orders = self._apply_filters(orders, args)
 
-        # Sort orders
-        if args.sort_by == 'order_total':
-            filtered_orders.sort(key=lambda x: x.order_total, reverse=args.reverse)
-        else:  # order_time
-            filtered_orders.sort(key=lambda x: x.order_time, reverse=args.reverse)
+        # Sort orders if we're displaying the orders list
+        if not (args.top_dishes or args.top_customers) or len(filtered_orders) > 0:
+            if args.sort_by == 'order_total':
+                filtered_orders.sort(key=lambda x: x.order_total, reverse=args.reverse)
+            else:  # order_time
+                filtered_orders.sort(key=lambda x: x.order_time, reverse=args.reverse)
 
+        # Handle summary reports (these can run even if filtered_orders is empty)
+        if args.top_dishes:
+            self._display_top_dishes(orders, filtered_orders)
+            # If only summary is requested, return after displaying it
+            if not filtered_orders or (args.top_dishes and args.top_customers and not any(
+                    [args.status, args.active_only, args.from_date, args.to_date,
+                     args.today, args.dish, args.customer])):
+                return filtered_orders
+
+        if args.top_customers:
+            self._display_top_customers(orders, filtered_orders)
+            # If only summary is requested, return after displaying it
+            if not filtered_orders or (args.top_dishes and args.top_customers and not any(
+                    [args.status, args.active_only, args.from_date, args.to_date,
+                     args.today, args.dish, args.customer])):
+                return filtered_orders
+
+        # Display orders table if we have orders and not only showing summary reports
         if not filtered_orders:
             print("No orders found matching the criteria.")
             return []
@@ -113,6 +142,21 @@ class ViewCommand(Command):
 
             # To date filter
             if to_date and order_date > to_date:
+                continue
+
+            # New - Dish filter (partial match)
+            if args.dish:
+                # Check if any dish in the order matches the filter
+                dish_match = False
+                for dish in order.dish_names:
+                    if args.dish.lower() in dish.lower():
+                        dish_match = True
+                        break
+                if not dish_match:
+                    continue
+
+            # New - Customer filter (partial match)
+            if args.customer and args.customer.lower() not in order.customer_name.lower():
                 continue
 
             # Order passes all filters
@@ -196,3 +240,80 @@ class ViewCommand(Command):
         print("\nRevenue by Status:")
         for status in self.VALID_STATUSES:
             print(f"  {status.capitalize()}: ${status_revenue[status]:.2f}")
+
+    def _display_top_dishes(self, all_orders, filtered_orders):
+        """Display the top 5 most ordered dishes"""
+        orders_to_analyze = filtered_orders if filtered_orders else all_orders
+
+        # Create a list of all dishes from all orders
+        all_dishes = []
+        for order in orders_to_analyze:
+            all_dishes.extend(order.dish_names)
+
+        # Count dish frequency
+        dish_counter = Counter(all_dishes)
+
+        # Get top 5 most ordered dishes
+        top_dishes = dish_counter.most_common(5)
+
+        # Display the results
+        print("\nTop 5 Most Ordered Dishes:")
+        if not top_dishes:
+            print("  No dishes found for the given criteria.")
+            return
+
+        dish_data = []
+        for dish, count in top_dishes:
+            # Calculate revenue for this dish (simplified by dividing orders equally)
+            dish_revenue = 0
+            for order in orders_to_analyze:
+                if dish in order.dish_names:
+                    # Distribute order total evenly among all dishes in the order
+                    dish_revenue += order.order_total / len(order.dish_names)
+
+            dish_data.append([dish, count, f"${dish_revenue:.2f}"])
+
+        # Display table
+        headers = ["Dish Name", "Order Count", "Est. Revenue"]
+        print(tabulate(dish_data, headers=headers, tablefmt="grid"))
+
+    def _display_top_customers(self, all_orders, filtered_orders):
+        """Display the top 5 customers by number of orders"""
+        orders_to_analyze = filtered_orders if filtered_orders else all_orders
+
+        # Count orders by customer
+        customer_orders = {}
+        for order in orders_to_analyze:
+            if order.customer_name not in customer_orders:
+                customer_orders[order.customer_name] = []
+            customer_orders[order.customer_name].append(order)
+
+        # Sort customers by order count
+        sorted_customers = sorted(
+            customer_orders.items(),
+            key=lambda x: len(x[1]),
+            reverse=True
+        )[:5]  # Take top 5
+
+        # Display the results
+        print("\nTop 5 Customers by Number of Orders:")
+        if not sorted_customers:
+            print("  No customers found for the given criteria.")
+            return
+
+        customer_data = []
+        for customer_name, orders in sorted_customers:
+            order_count = len(orders)
+            total_spent = sum(order.order_total for order in orders)
+            avg_order_value = total_spent / order_count
+
+            customer_data.append([
+                customer_name,
+                order_count,
+                f"${total_spent:.2f}",
+                f"${avg_order_value:.2f}"
+            ])
+
+        # Display table
+        headers = ["Customer Name", "Order Count", "Total Spent", "Avg Order"]
+        print(tabulate(customer_data, headers=headers, tablefmt="grid"))
