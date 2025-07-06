@@ -1,11 +1,25 @@
+import argparse
 from orderflow.commands.base import Command
 from tabulate import tabulate
 from datetime import datetime, date, timedelta
 from collections import Counter, defaultdict
+import math
+import sys
+
+
+class DateValidator(argparse.Action):
+    """Custom argparse action to validate date format"""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        try:
+            datetime.strptime(values, "%Y-%m-%d")
+            setattr(namespace, self.dest, values)
+        except ValueError:
+            parser.error(f"{option_string} must be in YYYY-MM-DD format")
 
 
 class ViewCommand(Command):
-    """Command to view all orders with comprehensive filtering and reporting options"""
+    """Command to view all orders with comprehensive filtering, pagination and reporting options"""
 
     VALID_STATUSES = ["new", "preparing", "delivered", "canceled"]
     DATE_FORMAT = "%Y-%m-%d"
@@ -15,92 +29,226 @@ class ViewCommand(Command):
 
     def add_arguments(self, parser):
         # Sorting arguments
-        parser.add_argument('--sort-by', choices=['order_total', 'order_time'],
-                            default='order_time', help='Field to sort by')
-        parser.add_argument('--reverse', action='store_true', help='Reverse the sort order')
+        sort_group = parser.add_argument_group('Sorting Options')
+        sort_group.add_argument(
+            '--sort-by',
+            choices=['order_total', 'order_time'],
+            default='order_time',
+            help='Field to sort by (default: order_time)'
+        )
+        sort_group.add_argument(
+            '--reverse',
+            action='store_true',
+            help='Reverse the sort order (default: False)'
+        )
 
         # Status filtering
-        parser.add_argument('--status', choices=self.VALID_STATUSES,
-                            help='Filter orders by status')
-        parser.add_argument('--active-only', action='store_true',
-                            help='Show only active orders (exclude canceled)')
+        status_group = parser.add_argument_group('Status Filtering')
+        status_group.add_argument(
+            '--status',
+            choices=self.VALID_STATUSES,
+            help=f'Filter orders by status (choices: {", ".join(self.VALID_STATUSES)})'
+        )
+        status_group.add_argument(
+            '--active-only',
+            action='store_true',
+            help='Show only active orders (exclude canceled)'
+        )
 
         # Date filtering
-        parser.add_argument('--from-date', help='Show orders from this date (YYYY-MM-DD format)')
-        parser.add_argument('--to-date', help='Show orders until this date (YYYY-MM-DD format)')
-        parser.add_argument('--today', action='store_true', help='Show only today\'s orders')
+        date_group = parser.add_argument_group('Date Filtering')
+        date_group.add_argument(
+            '--from-date',
+            action=DateValidator,
+            help='Show orders from this date (YYYY-MM-DD format)'
+        )
+        date_group.add_argument(
+            '--to-date',
+            action=DateValidator,
+            help='Show orders until this date (YYYY-MM-DD format)'
+        )
+        date_group.add_argument(
+            '--today',
+            action='store_true',
+            help='Show only today\'s orders'
+        )
 
         # Content filtering
-        parser.add_argument('--dish', help='Filter by dish name (partial matches allowed)')
-        parser.add_argument('--customer', help='Filter by customer name (partial matches allowed)')
-
-        # New - Tag and notes filtering
-        parser.add_argument('--tag', help='Filter by tag (partial matches allowed)')
-        parser.add_argument('--with-notes', action='store_true', help='Show only orders with notes')
-        parser.add_argument('--without-notes', action='store_true', help='Show only orders without notes')
+        content_group = parser.add_argument_group('Content Filtering')
+        content_group.add_argument(
+            '--dish',
+            help='Filter by dish name (partial matches allowed)'
+        )
+        content_group.add_argument(
+            '--customer',
+            help='Filter by customer name (partial matches allowed)'
+        )
+        content_group.add_argument(
+            '--tag',
+            help='Filter by tag (partial matches allowed)'
+        )
+        content_group.add_argument(
+            '--with-notes',
+            action='store_true',
+            help='Show only orders with notes'
+        )
+        content_group.add_argument(
+            '--without-notes',
+            action='store_true',
+            help='Show only orders without notes'
+        )
 
         # Summary reports
-        parser.add_argument('--top-dishes', action='store_true',
-                            help='Display the top 5 most ordered dishes')
-        parser.add_argument('--top-customers', action='store_true',
-                            help='Display the top 5 customers by number of orders')
+        report_group = parser.add_argument_group('Summary Reports')
+        report_group.add_argument(
+            '--top-dishes',
+            action='store_true',
+            help='Display the top 5 most ordered dishes'
+        )
+        report_group.add_argument(
+            '--top-customers',
+            action='store_true',
+            help='Display the top 5 customers by number of orders'
+        )
+
+        # Pagination options
+        pagination_group = parser.add_argument_group('Pagination')
+        pagination_group.add_argument(
+            '--page',
+            type=int,
+            default=1,
+            help='Page number to display (default: 1)'
+        )
+        pagination_group.add_argument(
+            '--page-size',
+            type=int,
+            default=10,
+            help='Number of orders per page (default: 10, use 0 for no pagination)'
+        )
+
+        # Add examples to epilog
+        parser.epilog = """
+Examples:
+  # Basic usage - view all orders
+  orderflow view
+
+  # Sort by total (highest first)
+  orderflow view --sort-by order_total --reverse
+
+  # Filter by date range
+  orderflow view --from-date 2023-01-01 --to-date 2023-01-31
+
+  # Today's orders with a specific status
+  orderflow view --today --status delivered
+
+  # Filter by dish and tag
+  orderflow view --dish "Pizza" --tag "delivery"
+
+  # View top customers for a specific time period
+  orderflow view --from-date 2023-01-01 --top-customers
+
+  # Combine multiple filters
+  orderflow view --customer "Smith" --status preparing --active-only
+
+  # Paginate through large result sets
+  orderflow view --page 2 --page-size 20
+"""
 
     def execute(self, args):
-        # Validate contradictory args
-        if args.with_notes and args.without_notes:
-            print("Error: Cannot specify both --with-notes and --without-notes")
+        try:
+            # Validate contradictory args
+            if args.with_notes and args.without_notes:
+                print("Error: Cannot specify both --with-notes and --without-notes")
+                return []
+
+            # Validate pagination parameters
+            if args.page < 1:
+                print("Error: Page number must be 1 or greater")
+                return []
+
+            if args.page_size < 0:
+                print("Error: Page size must be 0 (no pagination) or a positive number")
+                return []
+
+            # Get all orders
+            all_orders = self.storage.get_orders()
+
+            if not all_orders:
+                print("No orders found in the storage. Use 'orderflow add' to create new orders.")
+                return []
+
+            # Apply filters
+            filtered_orders = self._apply_filters(all_orders, args)
+
+            # Sort orders if we're displaying the orders list
+            if not (args.top_dishes or args.top_customers) or len(filtered_orders) > 0:
+                if args.sort_by == 'order_total':
+                    filtered_orders.sort(key=lambda x: x.order_total, reverse=args.reverse)
+                else:  # order_time
+                    filtered_orders.sort(key=lambda x: x.order_time, reverse=args.reverse)
+
+            # Handle summary reports (these can run even if filtered_orders is empty)
+            if args.top_dishes:
+                self._display_top_dishes(all_orders, filtered_orders)
+                # If only summary is requested, return after displaying it
+                if not filtered_orders or (args.top_dishes and args.top_customers and not any(
+                        [args.status, args.active_only, args.from_date, args.to_date,
+                         args.today, args.dish, args.customer, args.tag,
+                         args.with_notes, args.without_notes])):
+                    return filtered_orders
+
+            if args.top_customers:
+                self._display_top_customers(all_orders, filtered_orders)
+                # If only summary is requested, return after displaying it
+                if not filtered_orders or (args.top_dishes and args.top_customers and not any(
+                        [args.status, args.active_only, args.from_date, args.to_date,
+                         args.today, args.dish, args.customer, args.tag,
+                         args.with_notes, args.without_notes])):
+                    return filtered_orders
+
+            # Display orders table if we have orders and not only showing summary reports
+            if not filtered_orders:
+                print("No orders found matching the criteria.")
+                return []
+
+            # Apply pagination if enabled
+            paginated_orders = filtered_orders
+            if args.page_size > 0:
+                # Calculate pagination indexes
+                total_pages = math.ceil(len(filtered_orders) / args.page_size)
+                start_idx = (args.page - 1) * args.page_size
+                end_idx = start_idx + args.page_size
+
+                # Validate page number
+                if args.page > total_pages:
+                    print(f"Error: Page {args.page} does not exist. Maximum page is {total_pages}.")
+                    return []
+
+                paginated_orders = filtered_orders[start_idx:end_idx]
+
+                # Display pagination info
+                print(f"Showing page {args.page} of {total_pages} ({len(filtered_orders)} total orders)")
+
+            # Display orders table
+            self._display_orders_table(paginated_orders)
+
+            # Display status counts for all filtered orders
+            self._display_status_counts(all_orders, filtered_orders)
+
+            # Display revenue statistics for all filtered orders
+            self._display_revenue_stats(filtered_orders)
+
+            # Display tag-based revenue breakdown
+            self._display_tag_revenue_breakdown(filtered_orders)
+
+            return filtered_orders
+
+        except ValueError as e:
+            print(f"Error: {str(e)}")
             return []
-
-        # Get all orders
-        orders = self.storage.get_orders()
-
-        # Apply filters
-        filtered_orders = self._apply_filters(orders, args)
-
-        # Sort orders if we're displaying the orders list
-        if not (args.top_dishes or args.top_customers) or len(filtered_orders) > 0:
-            if args.sort_by == 'order_total':
-                filtered_orders.sort(key=lambda x: x.order_total, reverse=args.reverse)
-            else:  # order_time
-                filtered_orders.sort(key=lambda x: x.order_time, reverse=args.reverse)
-
-        # Handle summary reports (these can run even if filtered_orders is empty)
-        if args.top_dishes:
-            self._display_top_dishes(orders, filtered_orders)
-            # If only summary is requested, return after displaying it
-            if not filtered_orders or (args.top_dishes and args.top_customers and not any(
-                    [args.status, args.active_only, args.from_date, args.to_date,
-                     args.today, args.dish, args.customer, args.tag,
-                     args.with_notes, args.without_notes])):
-                return filtered_orders
-
-        if args.top_customers:
-            self._display_top_customers(orders, filtered_orders)
-            # If only summary is requested, return after displaying it
-            if not filtered_orders or (args.top_dishes and args.top_customers and not any(
-                    [args.status, args.active_only, args.from_date, args.to_date,
-                     args.today, args.dish, args.customer, args.tag,
-                     args.with_notes, args.without_notes])):
-                return filtered_orders
-
-        # Display orders table if we have orders and not only showing summary reports
-        if not filtered_orders:
-            print("No orders found matching the criteria.")
+        except Exception as e:
+            print(f"Unexpected error: {str(e)}")
             return []
-
-        # Display orders table
-        self._display_orders_table(filtered_orders)
-
-        # Display status counts
-        self._display_status_counts(orders, filtered_orders)
-
-        # Display revenue statistics
-        self._display_revenue_stats(filtered_orders)
-
-        # Display tag-based revenue breakdown
-        self._display_tag_revenue_breakdown(filtered_orders)
-
-        return filtered_orders
 
     def _apply_filters(self, orders, args):
         """Apply all filters to the orders list"""
@@ -174,7 +322,7 @@ class ViewCommand(Command):
             if args.customer and args.customer.lower() not in order.customer_name.lower():
                 continue
 
-            # New - Tag filter (partial match)
+            # Tag filter (partial match)
             if args.tag:
                 # Check if any tag in the order matches the filter
                 tag_match = False
@@ -185,7 +333,7 @@ class ViewCommand(Command):
                 if not tag_match:
                     continue
 
-            # New - Notes filters
+            # Notes filters
             if args.with_notes and not order.notes.strip():
                 continue
             if args.without_notes and order.notes.strip():
@@ -198,6 +346,9 @@ class ViewCommand(Command):
 
     def _display_orders_table(self, orders):
         """Display orders in a formatted table with tags and notes"""
+        if not orders:
+            return
+
         table_data = []
         for order in orders:
             # Format the date for better readability
@@ -209,14 +360,22 @@ class ViewCommand(Command):
 
             # Format tags and truncate notes if needed
             tags_str = ", ".join(order.tags) if order.tags else ""
+            if len(tags_str) > 20:  # Truncate long tags
+                tags_str = tags_str[:17] + "..."
+
             notes_str = order.notes if order.notes else ""
             if len(notes_str) > 30:  # Truncate long notes
                 notes_str = notes_str[:27] + "..."
 
+            # Format dishes with truncation if needed
+            dishes_str = ", ".join(order.dish_names) if isinstance(order.dish_names, list) else order.dish_names
+            if len(dishes_str) > 30:
+                dishes_str = dishes_str[:27] + "..."
+
             table_data.append([
                 order.order_id[:8] + "...",  # Truncate UUID for display
-                order.customer_name,
-                ", ".join(order.dish_names) if isinstance(order.dish_names, list) else order.dish_names,
+                order.customer_name[:20] + "..." if len(order.customer_name) > 20 else order.customer_name,
+                dishes_str,
                 f"${order.order_total:.2f}",
                 order.status,
                 formatted_time,
@@ -224,9 +383,18 @@ class ViewCommand(Command):
                 notes_str
             ])
 
-        # Display table
+        # Get terminal width for potential adaptive formatting
+        try:
+            term_width = sys.stdout.get_terminal_size().columns
+        except (AttributeError, OSError):
+            term_width = 120  # Default for non-terminal environments
+
+        # Choose table format based on available width
+        table_format = "grid" if term_width >= 120 else "simple"
+
+        # Display table with appropriate width handling
         headers = ["Order ID", "Customer", "Dishes", "Total", "Status", "Time", "Tags", "Notes"]
-        print(tabulate(table_data, headers=headers, tablefmt="grid"))
+        print(tabulate(table_data, headers=headers, tablefmt=table_format))
 
     def _display_status_counts(self, all_orders, filtered_orders):
         """Display count summary of orders by status"""
