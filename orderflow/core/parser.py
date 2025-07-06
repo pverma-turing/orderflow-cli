@@ -1,5 +1,6 @@
 import argparse
 from orderflow.commands.add import AddCommand
+from orderflow.commands.export import ExportCommand
 from orderflow.commands.view import ViewCommand
 from orderflow.commands.update_status import UpdateStatusCommand
 from orderflow.commands.check_duplicates import CheckDuplicatesCommand
@@ -64,5 +65,16 @@ For detailed help on a specific command, use:
     check_duplicates_command = CheckDuplicatesCommand(storage)
     check_duplicates_command.add_arguments(check_duplicates_parser)
     check_duplicates_parser.set_defaults(func=check_duplicates_command.execute)
+
+    # Export command
+    export_parser = subparsers.add_parser(
+        'export',
+        help='Export orders to CSV or JSON file',
+        description='Export filtered orders to a file in CSV or JSON format.',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    export_command = ExportCommand(storage)
+    export_command.add_arguments(export_parser)
+    export_parser.set_defaults(func=export_command.execute)
 
     return parser
