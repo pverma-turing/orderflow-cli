@@ -1,7 +1,7 @@
 from orderflow.commands.base import Command
 from tabulate import tabulate
 from datetime import datetime, date, timedelta
-from collections import Counter
+from collections import Counter, defaultdict
 
 
 class ViewCommand(Command):
@@ -30,17 +30,27 @@ class ViewCommand(Command):
         parser.add_argument('--to-date', help='Show orders until this date (YYYY-MM-DD format)')
         parser.add_argument('--today', action='store_true', help='Show only today\'s orders')
 
-        # New - Content filtering
+        # Content filtering
         parser.add_argument('--dish', help='Filter by dish name (partial matches allowed)')
         parser.add_argument('--customer', help='Filter by customer name (partial matches allowed)')
 
-        # New - Summary reports
+        # New - Tag and notes filtering
+        parser.add_argument('--tag', help='Filter by tag (partial matches allowed)')
+        parser.add_argument('--with-notes', action='store_true', help='Show only orders with notes')
+        parser.add_argument('--without-notes', action='store_true', help='Show only orders without notes')
+
+        # Summary reports
         parser.add_argument('--top-dishes', action='store_true',
                             help='Display the top 5 most ordered dishes')
         parser.add_argument('--top-customers', action='store_true',
                             help='Display the top 5 customers by number of orders')
 
     def execute(self, args):
+        # Validate contradictory args
+        if args.with_notes and args.without_notes:
+            print("Error: Cannot specify both --with-notes and --without-notes")
+            return []
+
         # Get all orders
         orders = self.storage.get_orders()
 
@@ -60,7 +70,8 @@ class ViewCommand(Command):
             # If only summary is requested, return after displaying it
             if not filtered_orders or (args.top_dishes and args.top_customers and not any(
                     [args.status, args.active_only, args.from_date, args.to_date,
-                     args.today, args.dish, args.customer])):
+                     args.today, args.dish, args.customer, args.tag,
+                     args.with_notes, args.without_notes])):
                 return filtered_orders
 
         if args.top_customers:
@@ -68,7 +79,8 @@ class ViewCommand(Command):
             # If only summary is requested, return after displaying it
             if not filtered_orders or (args.top_dishes and args.top_customers and not any(
                     [args.status, args.active_only, args.from_date, args.to_date,
-                     args.today, args.dish, args.customer])):
+                     args.today, args.dish, args.customer, args.tag,
+                     args.with_notes, args.without_notes])):
                 return filtered_orders
 
         # Display orders table if we have orders and not only showing summary reports
@@ -84,6 +96,9 @@ class ViewCommand(Command):
 
         # Display revenue statistics
         self._display_revenue_stats(filtered_orders)
+
+        # Display tag-based revenue breakdown
+        self._display_tag_revenue_breakdown(filtered_orders)
 
         return filtered_orders
 
@@ -144,7 +159,7 @@ class ViewCommand(Command):
             if to_date and order_date > to_date:
                 continue
 
-            # New - Dish filter (partial match)
+            # Dish filter (partial match)
             if args.dish:
                 # Check if any dish in the order matches the filter
                 dish_match = False
@@ -155,8 +170,25 @@ class ViewCommand(Command):
                 if not dish_match:
                     continue
 
-            # New - Customer filter (partial match)
+            # Customer filter (partial match)
             if args.customer and args.customer.lower() not in order.customer_name.lower():
+                continue
+
+            # New - Tag filter (partial match)
+            if args.tag:
+                # Check if any tag in the order matches the filter
+                tag_match = False
+                for tag in order.tags:
+                    if args.tag.lower() in tag.lower():
+                        tag_match = True
+                        break
+                if not tag_match:
+                    continue
+
+            # New - Notes filters
+            if args.with_notes and not order.notes.strip():
+                continue
+            if args.without_notes and order.notes.strip():
                 continue
 
             # Order passes all filters
@@ -165,7 +197,7 @@ class ViewCommand(Command):
         return filtered_orders
 
     def _display_orders_table(self, orders):
-        """Display orders in a formatted table"""
+        """Display orders in a formatted table with tags and notes"""
         table_data = []
         for order in orders:
             # Format the date for better readability
@@ -175,17 +207,25 @@ class ViewCommand(Command):
             except (ValueError, TypeError):
                 formatted_time = order.order_time
 
+            # Format tags and truncate notes if needed
+            tags_str = ", ".join(order.tags) if order.tags else ""
+            notes_str = order.notes if order.notes else ""
+            if len(notes_str) > 30:  # Truncate long notes
+                notes_str = notes_str[:27] + "..."
+
             table_data.append([
                 order.order_id[:8] + "...",  # Truncate UUID for display
                 order.customer_name,
                 ", ".join(order.dish_names) if isinstance(order.dish_names, list) else order.dish_names,
                 f"${order.order_total:.2f}",
                 order.status,
-                formatted_time
+                formatted_time,
+                tags_str,
+                notes_str
             ])
 
         # Display table
-        headers = ["Order ID", "Customer", "Dishes", "Total", "Status", "Time"]
+        headers = ["Order ID", "Customer", "Dishes", "Total", "Status", "Time", "Tags", "Notes"]
         print(tabulate(table_data, headers=headers, tablefmt="grid"))
 
     def _display_status_counts(self, all_orders, filtered_orders):
@@ -240,6 +280,49 @@ class ViewCommand(Command):
         print("\nRevenue by Status:")
         for status in self.VALID_STATUSES:
             print(f"  {status.capitalize()}: ${status_revenue[status]:.2f}")
+
+    def _display_tag_revenue_breakdown(self, orders):
+        """Display revenue breakdown by tags for filtered orders"""
+        if not orders:
+            return
+
+        # Count orders and sum revenue by tag
+        tag_stats = defaultdict(lambda: {'count': 0, 'revenue': 0.0})
+        orders_with_tags = 0
+        tag_revenue_total = 0.0
+
+        for order in orders:
+            if order.tags:
+                orders_with_tags += 1
+                for tag in order.tags:
+                    tag_stats[tag]['count'] += 1
+                    tag_stats[tag]['revenue'] += order.order_total
+                    tag_revenue_total += order.order_total
+
+        # Display tag revenue breakdown if applicable
+        if tag_stats:
+            print("\nRevenue Breakdown by Tag:")
+
+            # Prepare table data
+            tag_data = []
+            for tag, stats in sorted(tag_stats.items(), key=lambda x: x[1]['revenue'], reverse=True):
+                tag_data.append([
+                    tag,
+                    stats['count'],
+                    f"${stats['revenue']:.2f}",
+                    f"{(stats['revenue'] / tag_revenue_total) * 100:.1f}%"
+                ])
+
+            # Display as table
+            headers = ["Tag", "Orders", "Revenue", "% of Tagged Revenue"]
+            print(tabulate(tag_data, headers=headers, tablefmt="simple"))
+
+            # Handle orders with multiple tags being counted multiple times
+            if orders_with_tags > 0:
+                print(
+                    f"\nNote: {orders_with_tags} orders have tags. Orders with multiple tags are counted for each tag.")
+        else:
+            print("\nNo tagged orders found in the filtered results.")
 
     def _display_top_dishes(self, all_orders, filtered_orders):
         """Display the top 5 most ordered dishes"""
