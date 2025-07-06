@@ -17,7 +17,7 @@ class PositiveFloat(argparse.Action):
 
 
 class AddCommand(Command):
-    """Command to add a new order with input validation"""
+    """Command to add a new order with dish quantities"""
 
     def __init__(self, storage):
         self.storage = storage
@@ -29,11 +29,19 @@ class AddCommand(Command):
             required=True,
             help='Name of the customer (required)'
         )
-        parser.add_argument(
-            '--dish-names',
-            required=True,
-            help='Comma-separated list of dish names (required, e.g., "Pizza,Salad,Soda")'
+
+        # Handle both old and new dish parameter formats
+        dish_group = parser.add_mutually_exclusive_group(required=True)
+        dish_group.add_argument(
+            '--dishes',
+            help='Comma-separated list of dishes with optional quantities (e.g., "Paneer Tikka:2, Garlic Naan:3")'
         )
+        # Backward compatibility
+        dish_group.add_argument(
+            '--dish-names',
+            help='DEPRECATED: Use --dishes instead. Comma-separated list of dish names.'
+        )
+
         parser.add_argument(
             '--order-total',
             required=True,
@@ -60,17 +68,25 @@ class AddCommand(Command):
         # Add examples to epilog
         parser.epilog = """
 Examples:
-  orderflow add --customer-name "John Doe" --dish-names "Burger,Fries" --order-total 15.99
-  orderflow add --customer-name "Jane Smith" --dish-names "Pizza,Salad" --order-total 24.99 --status "preparing" --tags "delivery,special"
-  orderflow add --customer-name "Bob Johnson" --dish-names "Pasta" --order-total 12.50 --notes "Allergic to nuts"
+  # Add order with dish quantities
+  orderflow add --customer-name "John Doe" --dishes "Burger:1,Fries:2,Soda:1" --order-total 15.99
+
+  # Add order with regular dishes (quantity defaults to 1)
+  orderflow add --customer-name "Jane Smith" --dishes "Pizza, Salad" --order-total 24.99
+
+  # Add order with additional details
+  orderflow add --customer-name "Bob Johnson" --dishes "Pasta:1,Garlic Bread:2" --order-total 12.50 --status preparing --tags "dine-in,special" --notes "Allergic to nuts"
 """
 
     def execute(self, args):
         try:
+            # Determine which dish argument was used
+            dishes = args.dishes if args.dishes else args.dish_names
+
             # Create a new order (validation happens in the Order constructor)
             order = Order(
                 customer_name=args.customer_name,
-                dish_names=args.dish_names,
+                dishes=dishes,
                 order_total=args.order_total,
                 status=args.status,
                 tags=args.tags,
@@ -85,7 +101,7 @@ Examples:
 
                 # Display order details
                 print(f"Customer: {order.customer_name}")
-                print(f"Dishes: {', '.join(order.dish_names)}")
+                print(f"Dishes: {order.get_formatted_dishes()}")
                 print(f"Total: ${order.order_total:.2f}")
                 print(f"Status: {order.status}")
 

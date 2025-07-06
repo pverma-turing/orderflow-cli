@@ -124,18 +124,17 @@ class JsonStorage(Storage):
             return None
 
     def get_orders(self):
-        """Retrieve all orders from storage with error handling"""
+        """Retrieve all orders from storage with error handling and format conversion"""
         orders_data = self._read_all()
         orders = []
 
         for i, order_dict in enumerate(orders_data):
             try:
-                # Validate required fields
-                required_fields = ['order_id', 'customer_name', 'dish_names', 'order_total', 'status']
-                for field in required_fields:
-                    if field not in order_dict:
-                        print(f"Warning: Skipping order at index {i} - missing required field '{field}'")
-                        continue
+                # Handle old format conversion
+                if 'dish_names' in order_dict and 'dishes' not in order_dict:
+                    # Convert old dish_names format to new dishes format for downstream consistency
+                    dish_names = order_dict['dish_names']
+                    # No need to modify order_dict here - the Order class handles the conversion
 
                 # Create order object
                 order = Order.from_dict(order_dict)

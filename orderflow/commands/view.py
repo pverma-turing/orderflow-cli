@@ -289,6 +289,11 @@ Examples:
             if args.active_only and order.status == "canceled":
                 continue
 
+            if args.dish:
+                # Check if any dish in the order matches the filter
+                if not order.has_dish(args.dish):
+                    continue
+
             # Date filters
             order_datetime = None
             try:
@@ -345,7 +350,7 @@ Examples:
         return filtered_orders
 
     def _display_orders_table(self, orders):
-        """Display orders in a formatted table with tags and notes"""
+        """Display orders in a formatted table with dish quantities"""
         if not orders:
             return
 
@@ -358,6 +363,11 @@ Examples:
             except (ValueError, TypeError):
                 formatted_time = order.order_time
 
+            # Format dishes with quantities
+            dishes_str = order.get_formatted_dishes()
+            if len(dishes_str) > 30:
+                dishes_str = dishes_str[:27] + "..."
+
             # Format tags and truncate notes if needed
             tags_str = ", ".join(order.tags) if order.tags else ""
             if len(tags_str) > 20:  # Truncate long tags
@@ -366,11 +376,6 @@ Examples:
             notes_str = order.notes if order.notes else ""
             if len(notes_str) > 30:  # Truncate long notes
                 notes_str = notes_str[:27] + "..."
-
-            # Format dishes with truncation if needed
-            dishes_str = ", ".join(order.dish_names) if isinstance(order.dish_names, list) else order.dish_names
-            if len(dishes_str) > 30:
-                dishes_str = dishes_str[:27] + "..."
 
             table_data.append([
                 order.order_id[:8] + "...",  # Truncate UUID for display
@@ -493,19 +498,39 @@ Examples:
             print("\nNo tagged orders found in the filtered results.")
 
     def _display_top_dishes(self, all_orders, filtered_orders):
-        """Display the top 5 most ordered dishes"""
+        """Display the top 5 most ordered dishes with quantities and accurate revenue"""
         orders_to_analyze = filtered_orders if filtered_orders else all_orders
 
-        # Create a list of all dishes from all orders
-        all_dishes = []
+        # Create dish counters and revenue trackers
+        dish_quantities = {}
+        dish_revenue = {}
+
+        # Process all orders
         for order in orders_to_analyze:
-            all_dishes.extend(order.dish_names)
+            # Get the proportional revenue for each dish in this order
+            dish_revenues = order.calculate_dish_revenue()
 
-        # Count dish frequency
-        dish_counter = Counter(all_dishes)
+            # Add up quantities and revenue for each dish
+            for dish in order.dishes:
+                name = dish['name']
+                quantity = dish['quantity']
 
-        # Get top 5 most ordered dishes
-        top_dishes = dish_counter.most_common(5)
+                # Update quantity counts
+                if name not in dish_quantities:
+                    dish_quantities[name] = 0
+                dish_quantities[name] += quantity
+
+                # Update revenue for each dish
+                if name not in dish_revenue:
+                    dish_revenue[name] = 0
+                dish_revenue[name] += dish_revenues.get(name, 0)
+
+        # Sort dishes by quantity ordered
+        top_dishes = sorted(
+            dish_quantities.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:5]
 
         # Display the results
         print("\nTop 5 Most Ordered Dishes:")
@@ -514,18 +539,17 @@ Examples:
             return
 
         dish_data = []
-        for dish, count in top_dishes:
-            # Calculate revenue for this dish (simplified by dividing orders equally)
-            dish_revenue = 0
-            for order in orders_to_analyze:
-                if dish in order.dish_names:
-                    # Distribute order total evenly among all dishes in the order
-                    dish_revenue += order.order_total / len(order.dish_names)
-
-            dish_data.append([dish, count, f"${dish_revenue:.2f}"])
+        for dish_name, quantity in top_dishes:
+            revenue = dish_revenue.get(dish_name, 0)
+            dish_data.append([
+                dish_name,
+                quantity,
+                f"${revenue:.2f}",
+                f"${revenue / quantity:.2f}" if quantity > 0 else "$0.00"
+            ])
 
         # Display table
-        headers = ["Dish Name", "Order Count", "Est. Revenue"]
+        headers = ["Dish Name", "Quantity", "Total Revenue", "Avg. Per Unit"]
         print(tabulate(dish_data, headers=headers, tablefmt="grid"))
 
     def _display_top_customers(self, all_orders, filtered_orders):

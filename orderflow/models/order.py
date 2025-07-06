@@ -4,35 +4,22 @@ from datetime import datetime
 
 
 class Order:
-    """Represents a food order in the system with input validation"""
+    """Represents a food order in the system with dish quantities"""
 
     VALID_STATUSES = ["new", "preparing", "delivered", "canceled"]
     DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-    def __init__(self, customer_name, dish_names, order_total, status="new",
+    def __init__(self, customer_name, dishes, order_total, status="new",
                  order_id=None, order_time=None, tags=None, notes=None):
         # Validate customer name
         if not customer_name or not customer_name.strip():
             raise ValueError("Customer name cannot be empty")
         self.customer_name = customer_name.strip()
 
-        # Validate dish names
-        if not dish_names:
-            raise ValueError("Dish names cannot be empty")
-
-        # Process dish names
-        if isinstance(dish_names, list):
-            if not dish_names:
-                raise ValueError("At least one dish must be provided")
-            self.dish_names = [d.strip() for d in dish_names if d.strip()]
-            if not self.dish_names:
-                raise ValueError("At least one non-empty dish must be provided")
-        else:
-            # Split by comma and validate
-            dish_list = [d.strip() for d in dish_names.split(',') if d.strip()]
-            if not dish_list:
-                raise ValueError("At least one non-empty dish must be provided")
-            self.dish_names = dish_list
+        # Process dishes (now supporting quantities)
+        self.dishes = self._parse_dishes(dishes)
+        if not self.dishes:
+            raise ValueError("At least one dish must be provided")
 
         # Validate order total
         try:
@@ -99,12 +86,121 @@ class Order:
         # Handle notes (allow empty notes)
         self.notes = notes or ""
 
+    def _parse_dishes(self, dishes):
+        """
+        Parse dishes input, supporting both:
+        1. List of dish dicts with name and quantity (new format)
+        2. List of dish names (old format)
+        3. String in format "Dish1:2, Dish2:1" (new CLI format)
+        4. String in format "Dish1, Dish2" (old CLI format)
+
+        Returns a list of dictionaries: [{"name": "Dish1", "quantity": 2}, ...]
+        """
+        if not dishes:
+            return []
+
+        # 1. Already a list of dish dicts (likely from storage)
+        if isinstance(dishes, list) and len(dishes) > 0 and isinstance(dishes[0], dict):
+            # Validate each dict has required fields
+            result = []
+            for dish in dishes:
+                if 'name' in dish:
+                    # Ensure quantity is an integer >= 1
+                    qty = dish.get('quantity', 1)
+                    try:
+                        qty = int(qty)
+                        if qty < 1:
+                            qty = 1
+                    except (ValueError, TypeError):
+                        qty = 1
+
+                    result.append({
+                        'name': dish['name'].strip(),
+                        'quantity': qty
+                    })
+            return result
+
+        # 2. List of dish names (old format - convert to new format)
+        if isinstance(dishes, list):
+            return [{'name': dish.strip(), 'quantity': 1} for dish in dishes if dish.strip()]
+
+        # 3 & 4. String input from CLI - could be either format
+        if isinstance(dishes, str):
+            result = []
+            # Split by commas
+            items = [item.strip() for item in dishes.split(',') if item.strip()]
+
+            for item in items:
+                # Check if it has quantity indicator (:)
+                if ':' in item:
+                    # New format: "Dish:Quantity"
+                    parts = item.split(':', 1)
+                    dish_name = parts[0].strip()
+                    if not dish_name:
+                        continue
+
+                    try:
+                        quantity = int(parts[1].strip())
+                        if quantity < 1:
+                            quantity = 1
+                    except (ValueError, IndexError):
+                        quantity = 1
+
+                    result.append({
+                        'name': dish_name,
+                        'quantity': quantity
+                    })
+                else:
+                    # Old format: just the dish name
+                    result.append({
+                        'name': item.strip(),
+                        'quantity': 1
+                    })
+
+            return result
+
+        # Fallback for unexpected input type
+        return []
+
+    def get_dish_names(self):
+        """Get a simple list of dish names (backward compatible)"""
+        return [dish['name'] for dish in self.dishes]
+
+    def get_formatted_dishes(self):
+        """Get a formatted string representation of dishes with quantities"""
+        return ", ".join([f"{dish['name']} (×{dish['quantity']})" for dish in self.dishes])
+
+    def has_dish(self, dish_name):
+        """Check if an order contains a specific dish (case insensitive partial match)"""
+        search = dish_name.lower()
+        for dish in self.dishes:
+            if search in dish['name'].lower():
+                return True
+        return False
+
+    def get_total_quantity(self):
+        """Get the total quantity of all dishes"""
+        return sum(dish['quantity'] for dish in self.dishes)
+
+    def calculate_dish_revenue(self):
+        """Calculate the revenue for each dish proportionally based on quantity"""
+        total_quantity = self.get_total_quantity()
+        if total_quantity == 0:  # Defensive programming
+            return {}
+
+        # Distribute revenue proportionally
+        per_unit_revenue = self.order_total / total_quantity
+        return {
+            dish['name']: dish['quantity'] * per_unit_revenue
+            for dish in self.dishes
+        }
+
     def to_dict(self):
         """Convert order to dictionary for storage"""
         return {
             'order_id': self.order_id,
             'customer_name': self.customer_name,
-            'dish_names': ','.join(self.dish_names),
+            'dishes': self.dishes,  # Now a list of dicts with name and quantity
             'order_total': self.order_total,
             'status': self.status,
             'order_time': self.order_time,
@@ -114,12 +210,24 @@ class Order:
 
     @classmethod
     def from_dict(cls, data):
-        """Create order instance from dictionary data with validation"""
+        """Create order instance from dictionary data with backward compatibility"""
         # Check required fields
-        required_fields = ['order_id', 'customer_name', 'dish_names', 'order_total', 'status']
+        required_fields = ['order_id', 'customer_name', 'order_total', 'status']
         for field in required_fields:
             if field not in data:
                 raise ValueError(f"Missing required field: {field}")
+
+        # Handle dishes - supporting both old and new formats
+        dishes = None
+
+        # New format: dishes is a list of dicts with name and quantity
+        if 'dishes' in data and isinstance(data['dishes'], list):
+            dishes = data['dishes']
+        # Old format: dish_names is a comma-separated string
+        elif 'dish_names' in data:
+            dishes = data['dish_names']  # Will be parsed in __init__
+        else:
+            raise ValueError("Missing required field: either 'dishes' or 'dish_names' must be present")
 
         # Handle tags (may be missing in older data)
         tags = data.get('tags', "")
@@ -136,7 +244,7 @@ class Order:
         # Create with validation
         return cls(
             customer_name=data['customer_name'],
-            dish_names=data['dish_names'],
+            dishes=dishes,
             order_total=data['order_total'],
             status=data['status'],
             order_id=data['order_id'],
