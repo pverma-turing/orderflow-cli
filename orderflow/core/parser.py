@@ -1,6 +1,7 @@
 import argparse
 from orderflow.commands.add import AddCommand
 from orderflow.commands.view import ViewCommand
+from orderflow.commands.update_status import UpdateStatusCommand
 
 
 def create_parser(storage):
@@ -22,5 +23,11 @@ def create_parser(storage):
     view_command = ViewCommand(storage)
     view_command.add_arguments(view_parser)
     view_parser.set_defaults(func=view_command.execute)
+
+    # Update status command
+    update_status_parser = subparsers.add_parser('update-status', help='Update an order status')
+    update_status_command = UpdateStatusCommand(storage)
+    update_status_command.add_arguments(update_status_parser)
+    update_status_parser.set_defaults(func=update_status_command.execute)
 
     return parser

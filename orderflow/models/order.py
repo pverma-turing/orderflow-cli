@@ -5,12 +5,19 @@ from datetime import datetime
 class Order:
     """Represents a food order in the system"""
 
+    VALID_STATUSES = ["new", "preparing", "delivered", "canceled"]
+
     def __init__(self, customer_name, dish_names, order_total, status="new",
                  order_id=None, order_time=None):
         self.customer_name = customer_name
         self.dish_names = dish_names if isinstance(dish_names, list) else dish_names.split(',')
         self.order_total = float(order_total)
+
+        # Validate status
+        if status not in self.VALID_STATUSES:
+            raise ValueError(f"Invalid status: {status}. Must be one of {', '.join(self.VALID_STATUSES)}")
         self.status = status
+
         self.order_id = order_id or str(uuid.uuid4())
         self.order_time = order_time or datetime.now().isoformat()
 
