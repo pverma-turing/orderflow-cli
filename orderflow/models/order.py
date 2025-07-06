@@ -6,6 +6,7 @@ class Order:
     """Represents a food order in the system"""
 
     VALID_STATUSES = ["new", "preparing", "delivered", "canceled"]
+    DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
     def __init__(self, customer_name, dish_names, order_total, status="new",
                  order_id=None, order_time=None):
@@ -19,7 +20,13 @@ class Order:
         self.status = status
 
         self.order_id = order_id or str(uuid.uuid4())
-        self.order_time = order_time or datetime.now().isoformat()
+
+        # Handle order time
+        if order_time:
+            self.order_time = order_time
+        else:
+            # Store current time in ISO format for easy sorting and parsing
+            self.order_time = datetime.now().isoformat()
 
     def to_dict(self):
         """Convert order to dictionary for storage"""
