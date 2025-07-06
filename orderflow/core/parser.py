@@ -2,6 +2,7 @@ import argparse
 from orderflow.commands.add import AddCommand
 from orderflow.commands.view import ViewCommand
 from orderflow.commands.update_status import UpdateStatusCommand
+from orderflow.commands.check_duplicates import CheckDuplicatesCommand
 
 
 def create_parser(storage):
@@ -52,5 +53,16 @@ For detailed help on a specific command, use:
     update_status_command = UpdateStatusCommand(storage)
     update_status_command.add_arguments(update_status_parser)
     update_status_parser.set_defaults(func=update_status_command.execute)
+
+    # New: Check duplicates command
+    check_duplicates_parser = subparsers.add_parser(
+        'check-duplicates',
+        help='Identify potential duplicate orders',
+        description='Find duplicate orders based on customer, dishes, and time proximity.',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    check_duplicates_command = CheckDuplicatesCommand(storage)
+    check_duplicates_command.add_arguments(check_duplicates_parser)
+    check_duplicates_parser.set_defaults(func=check_duplicates_command.execute)
 
     return parser

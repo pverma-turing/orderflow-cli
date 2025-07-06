@@ -252,3 +252,52 @@ class Order:
             tags=tags,
             notes=notes
         )
+
+    def are_dishes_equal(self, other_order, exact_match=True):
+        """
+        Compare if dishes between this order and another are the same
+
+        If exact_match is True, compares quantities exactly
+        If exact_match is False, only compares if the dish names match
+        """
+        # Get normalized dish lists with quantities
+        if not hasattr(self, 'dishes') or not hasattr(other_order, 'dishes'):
+            # Fall back to comparing dish names lists for old format orders
+            my_dishes = set(self.get_dish_names())
+            other_dishes = set(other_order.get_dish_names())
+            return my_dishes == other_dishes
+
+        # Normalize dishes to dictionary of name->quantity
+        my_dishes = {}
+        for dish in self.dishes:
+            name = dish['name'].lower().strip()
+            qty = dish.get('quantity', 1)
+            if name in my_dishes:
+                my_dishes[name] += qty
+            else:
+                my_dishes[name] = qty
+
+        other_dishes = {}
+        for dish in other_order.dishes:
+            name = dish['name'].lower().strip()
+            qty = dish.get('quantity', 1)
+            if name in other_dishes:
+                other_dishes[name] += qty
+            else:
+                other_dishes[name] = qty
+
+        # For exact match, both dish lists must be identical
+        if exact_match:
+            # Must have same number of unique dishes
+            if len(my_dishes) != len(other_dishes):
+                return False
+
+            # Each dish must have the same quantity in both orders
+            for dish_name, qty1 in my_dishes.items():
+                if dish_name not in other_dishes or other_dishes[dish_name] != qty1:
+                    return False
+
+            return True
+        else:
+            # For relaxed match, check if the dish sets are the same (ignoring quantities)
+            return set(my_dishes.keys()) == set(other_dishes.keys())
