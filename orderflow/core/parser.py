@@ -1,6 +1,7 @@
 import argparse
 from orderflow.commands.add import AddCommand
 from orderflow.commands.export import ExportCommand
+from orderflow.commands.status_history import StatusHistoryCommand
 from orderflow.commands.view import ViewCommand
 from orderflow.commands.update_status import UpdateStatusCommand
 from orderflow.commands.check_duplicates import CheckDuplicatesCommand
@@ -76,5 +77,17 @@ For detailed help on a specific command, use:
     export_command = ExportCommand(storage)
     export_command.add_arguments(export_parser)
     export_parser.set_defaults(func=export_command.execute)
+
+    # Export command
+    status_history_parser = subparsers.add_parser(
+        'status_history',
+        help='Status history for orders',
+        description='View status history of orders',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    status_history_command = StatusHistoryCommand(storage)
+    status_history_command.add_arguments(status_history_parser)
+    status_history_parser.set_defaults(func=status_history_command.execute)
 
     return parser

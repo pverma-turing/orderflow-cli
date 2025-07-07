@@ -1,4 +1,6 @@
 import argparse
+import datetime
+
 from orderflow.commands.base import Command
 from orderflow.models.order import Order
 from tabulate import tabulate
@@ -71,10 +73,12 @@ Examples:
     def execute(self, args):
         try:
             # Determine if this is a bulk update or single update
+            # Get current timestamp for this update
+            timestamp = datetime.datetime.now().isoformat()
             if args.ids:
-                return self._execute_bulk_update(args)
+                return self._execute_bulk_update(args, timestamp)
             else:
-                return self._execute_single_update(args)
+                return self._execute_single_update(args, timestamp)
 
         except ValueError as e:
             print(f"Error: {str(e)}")
@@ -83,7 +87,7 @@ Examples:
             print(f"Unexpected error: {str(e)}")
             return None
 
-    def _execute_single_update(self, args):
+    def _execute_single_update(self, args, timestamp):
         """Handle a single order update (backward compatibility)"""
         # Validate order ID
         if not args.order_id:
@@ -99,12 +103,25 @@ Examples:
 
         # Update the status
         old_status = order.status
+
+        # Check if already in final state
+        if order.status in ["delivered", "canceled"]:
+            print(f"Cannot update: Order already in final state '{order.status}'")
+            return
+
         # Check if transition is valid
         if args.status not in self.VALID_TRANSITIONS[order.status]:
             print(f"  Invalid transition: {order.status} → {args.status}")
             return None
 
         order.status = args.status
+
+        # Initialize status_history if it doesn't exist (backward compatibility)
+        if not hasattr(order, 'status_history'):
+            order.status_history = [(order.order_time, "new")]
+
+        # Add new status to history
+        order.status_history.append((timestamp, args.status))
 
         # Save the updated order
         updated_order = self.storage.save_order(order)
@@ -125,7 +142,7 @@ Examples:
             print("Failed to update order status. Please check the errors above.")
             return None
 
-    def _execute_bulk_update(self, args):
+    def _execute_bulk_update(self, args, timestamp):
         """Handle bulk update of multiple orders using batch operations"""
         # Parse the comma-separated list of IDs
         order_ids = [order_id.strip() for order_id in args.ids.split(',') if order_id.strip()]
@@ -171,6 +188,16 @@ Examples:
 
             # Store old status for reporting
             old_status = order.status
+
+            # Check if already in final state
+            if order.status in ["delivered", "canceled"]:
+                print(f"  Cannot update: Order already in final state '{order.status}'")
+                results_data.append([order_id[:8] + "...",
+                                     "Unchanged",
+                                     args.status,
+                                     "already_final_status"])
+                continue
+
             # Check if transition is valid
             if args.status not in self.VALID_TRANSITIONS[order.status]:
                 print(f"  Invalid transition: {order.status} → {args.status}")
@@ -182,6 +209,12 @@ Examples:
 
             # Update the status
             order.status = args.status
+            # Initialize status_history if it doesn't exist (backward compatibility)
+            if not hasattr(order, 'status_history'):
+                order.status_history = [(order.order_time, "new")]
+
+            # Add new status to history
+            order.status_history.append((timestamp, args.status))
 
             # Add to batch update list
             to_update.append(order)
