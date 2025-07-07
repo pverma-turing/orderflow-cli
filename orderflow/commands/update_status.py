@@ -55,6 +55,21 @@ class UpdateStatusCommand(Command):
                 # Interactive mode for single order update
                 self._process_interactive_update(args.status, args.note, timestamp, self.storage)
 
+    def _format_timestamp_for_display(self, timestamp):
+        """Convert ISO timestamp to human-readable format."""
+        dt = datetime.datetime.fromisoformat(timestamp)
+        return dt.strftime("%Y-%m-%d %H:%M")
+
+    def _display_status_change_summary(self, order_id, old_status, new_status, timestamp, note=None):
+        """Display a summary of status change in a consistent format."""
+        human_time = self._format_timestamp_for_display(timestamp)
+
+        summary = f"Order ID {order_id}: Status changed from '{old_status}' to '{new_status}' at {human_time}"
+        if note:
+            summary += f" [Note: {note}]"
+
+        print(summary)
+
     def _process_rollback(self, order_id, storage):
         order = storage.get_order(order_id)
 
@@ -78,6 +93,7 @@ class UpdateStatusCommand(Command):
         previous_status = previous_entry[1]
 
         # Update the order's current status
+        current_status = order.status
         order.status = previous_status
 
         # Save the updated order
@@ -104,17 +120,18 @@ class UpdateStatusCommand(Command):
                 continue
 
             # Display current status
-            print(f"Order {order_id} - Current status: {order.status}")
+            current_status = order.status
+            print(f"Order {order_id} - Current status: {current_status}")
 
             # Check if already in final state
-            if order.status in ["delivered", "canceled"]:
-                print(f"  Cannot update: Order already in final state '{order.status}'")
+            if current_status in ["delivered", "canceled"]:
+                print(f"  Cannot update: Order already in final state '{current_status}'")
                 results["already_final"].append(order_id)
                 continue
 
             # Check if transition is valid
-            if status not in self.VALID_TRANSITIONS[order.status]:
-                print(f"  Invalid transition: {order.status} → {status}")
+            if status not in self.VALID_TRANSITIONS[current_status]:
+                print(f"  Invalid transition: {current_status} → {status}")
                 results["invalid_transition"].append(order_id)
                 continue
 
@@ -131,11 +148,8 @@ class UpdateStatusCommand(Command):
             # Save the updated order
             storage.update_order(order)
 
-            # Show success message with note information
-            status_msg = f"  Updated to: {status}"
-            if note:
-                status_msg += f" (Note: {note})"
-            print(status_msg)
+            # Display summary of the status change
+            self._display_status_change_summary(order_id, current_status, status, timestamp, note)
 
             results["updated"].append(order_id)
 
@@ -152,17 +166,18 @@ class UpdateStatusCommand(Command):
             print(f"Order {order_id} not found")
             return
 
-        # Display current status
-        print(f"Current status: {order.status}")
+        # Get current status before update
+        current_status = order.status
+        print(f"Current status: {current_status}")
 
         # Check if already in final state
-        if order.status in ["delivered", "canceled"]:
-            print(f"Cannot update: Order already in final state '{order.status}'")
+        if current_status in ["delivered", "canceled"]:
+            print(f"Cannot update: Order already in final state '{current_status}'")
             return
 
         # Check if transition is valid
-        if status not in self.VALID_TRANSITIONS[order.status]:
-            print(f"Invalid transition: {order.status} → {status}")
+        if status not in self.VALID_TRANSITIONS[current_status]:
+            print(f"Invalid transition: {current_status} → {status}")
             return
 
         # Update the order status
@@ -178,11 +193,8 @@ class UpdateStatusCommand(Command):
         # Save the updated order
         storage.update_order(order)
 
-        # Show success message with note information
-        status_msg = f"Order status updated to: {status}"
-        if note:
-            status_msg += f" (Note: {note})"
-        print(status_msg)
+        # Display summary of the status change
+        self._display_status_change_summary(order_id, current_status, status, timestamp, note)
 
     def _process_interactive_update(self, status, note, timestamp, storage):
         order_id = input("Enter order ID: ").strip()
