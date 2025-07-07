@@ -30,6 +30,9 @@ class StatusHistoryCommand(Command):
             print(f"Order {args.id} not found")
             return
 
+        # Display order metadata header - common to all display modes
+        self._display_order_metadata(order, args.id)
+
         # Handle orders without status_history (backward compatibility)
         if not hasattr(order, 'status_history'):
             if since_timestamp:
@@ -39,13 +42,12 @@ class StatusHistoryCommand(Command):
                     return
 
             if args.audit:
-                print(f"ORDER: {args.id} | CUSTOMER: {order.customer_name}")
+                print("--- STATUS AUDIT LOG ---")
                 print(f"[{order.order_time}] Status set to: {order.status}")
+                print("--- END OF AUDIT LOG ---")
                 return
             else:
-                print(f"Order {args.id} - {order.customer_name}")
-                print("No status history recorded. Only current status is available.")
-                print(f"Current status: {order.status} (since order creation)")
+                print("No recorded status transitions available.")
                 return
 
         # Filter history entries if --since is provided
@@ -65,15 +67,43 @@ class StatusHistoryCommand(Command):
 
         # Handle audit log format
         if args.audit:
-            self._display_audit_log(order, args.id, filtered_history)
+            self._display_audit_log(filtered_history)
         else:
-            self._display_table_format(order, filtered_history)
+            self._display_table_format(filtered_history, order.order_time)
 
-    def _display_audit_log(self, order, order_id, history_entries):
+    def _display_order_metadata(self, order, order_id):
+        """Display order metadata header with creation information."""
+        # Format creation timestamp for readability
+        created_at = datetime.datetime.fromisoformat(order.order_time).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Create a consistent header box
+        print("┌" + "─" * 50 + "┐")
+        print(f"│ Order Information                                  │")
+        print("├" + "─" * 50 + "┤")
+        print(f"│ Order ID:       {order_id:<34} │")
+        print(f"│ Customer:       {order.customer_name:<34} │")
+        print(f"│ Created At:     {created_at:<34} │")
+        print(f"│ Current Status: {order.status:<34} │")
+
+        # Add order total if available
+        if hasattr(order, 'order_total'):
+            print(f"│ Order Total:    {order.order_total:<34} │")
+
+        # Add dish count if available
+        if hasattr(order, 'dishes') and order.dishes:
+            dish_count = len(order.dishes) if isinstance(order.dishes, list) else 1
+            print(f"│ Dishes:         {dish_count:<34} │")
+
+        # Add tags if available and not empty
+        if hasattr(order, 'tags') and order.tags:
+            tags_str = ", ".join(order.tags) if len(", ".join(order.tags)) <= 34 else f"{len(order.tags)} tags"
+            print(f"│ Tags:           {tags_str:<34} │")
+
+        print("└" + "─" * 50 + "┘")
+        print()  # Add a blank line for separation
+
+    def _display_audit_log(self, history_entries):
         """Display status history in plain-text audit log format."""
-        # Print order header info
-        print(f"ORDER: {order_id} | CUSTOMER: {order.customer_name}")
-        print(f"CREATED: {order.order_time}")
         print("--- STATUS AUDIT LOG ---")
 
         # Print each status change in chronological order
@@ -94,12 +124,9 @@ class StatusHistoryCommand(Command):
         # Print a separator to mark the end of the log
         print("--- END OF AUDIT LOG ---")
 
-    def _display_table_format(self, order, history_entries):
+    def _display_table_format(self, history_entries, order_time):
         """Display status history in tabular format."""
-        # Display order information and status history header
-        print(f"Order {order.order_id} - {order.customer_name}")
-        print(f"Created: {order.order_time}")
-        print("\nStatus History:")
+        print("Status History:")
 
         # Determine table width based on content
         has_notes = any(len(entry) > 2 and entry[2] for entry in history_entries)
@@ -155,6 +182,3 @@ class StatusHistoryCommand(Command):
             last_dt = datetime.datetime.fromisoformat(last_timestamp)
             filtered_duration = last_dt - first_dt
             print(f"Duration in filtered view: {str(filtered_duration).split('.')[0]}")
-
-        # Display current status
-        print(f"Current status: {order.status}")
