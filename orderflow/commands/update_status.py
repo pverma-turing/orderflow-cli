@@ -32,20 +32,20 @@ class UpdateStatusCommand(Command):
     def execute(self, args):
         # Check for invalid show-history combinations
         if args.show_history and args.ids:
-            print("Warning: --show-history is ignored when using --ids for batch updates")
+            print("Warning: --show-history is ignored when using --ids for batch updates.")
         elif args.show_history and args.rollback:
-            print("Warning: --show-history is ignored when using --rollback")
+            print("Warning: --show-history is ignored when using --rollback.")
 
         # Validate arguments
         if args.rollback:
             if args.ids:
-                print("Error: Bulk rollback with --ids is not supported. Please use --id for a single order.")
+                print("[Error] Bulk rollback with --ids is not supported. Please use --id for a single order.")
                 return
             if args.note:
-                print("Error: Cannot use --note with --rollback.")
+                print("[Error] Cannot use --note with --rollback.")
                 return
             if not args.id:
-                print("Error: Order ID is required for rollback. Please use --id.")
+                print("[Error] Order ID is required for rollback. Please use --id.")
                 return
 
             # Process rollback for single order
@@ -66,22 +66,27 @@ class UpdateStatusCommand(Command):
                 self._process_single_update(args.id, args.status, args.note, timestamp, self.storage)
             else:
                 # Interactive mode for single order update
-                self._process_interactive_update(args.status, args.note, args.show_history, timestamp, self.storage)
+                order_id = input("Enter order ID: ").strip()
+
+                # Show history if requested
+                if args.show_history:
+                    self._display_status_history(order_id, self.storage)
+                    print()  # Add blank line for separation
+
+                self._process_single_update(order_id, args.status, args.note, timestamp, self.storage)
 
     def _display_status_history(self, order_id, storage):
         """Display the order's status history in tabular format."""
         order = storage.get_order(order_id)
 
         if not order:
-            print(f"Order {order_id} not found")
+            print(f"[Error] Order ID {order_id} not found.")
             return False
 
         # Handle orders without status_history (backward compatibility)
-        if not hasattr(order, 'status_history'):
-            print(f"Order {order_id} - {order.customer_name}")
-            print("No status history recorded. Only current status is available.")
-            print(f"Current status: {order.status} (since order creation)")
-            return True
+        if not hasattr(order, 'status_history') or not order.status_history:
+            print(f"[Error] No status history available for Order ID {order_id}.")
+            return False
 
         # Display order information and status history header
         print(f"Order {order_id} - {order.customer_name}")
@@ -165,12 +170,16 @@ class UpdateStatusCommand(Command):
         order = storage.get_order(order_id)
 
         if not order:
-            print(f"Order {order_id} not found")
+            print(f"[Error] Order ID {order_id} not found.")
             return
 
         # Check if there's a status history to roll back
-        if not hasattr(order, 'status_history') or len(order.status_history) <= 1:
-            print(f"Cannot roll back order {order_id}: No previous status exists")
+        if not hasattr(order, 'status_history'):
+            print(f"[Error] No status history available for Order ID {order_id}.")
+            return
+
+        if len(order.status_history) <= 1:
+            print(f"[Error] Cannot rollback Order ID {order_id}. Only one status entry exists.")
             return
 
         # Display current status before rollback
@@ -202,12 +211,13 @@ class UpdateStatusCommand(Command):
 
     def _process_batch_update(self, order_ids, status, note, timestamp, storage):
         # Batch update with validation for each order
-        results = {"updated": [], "invalid_transition": [], "already_final": []}
+        results = {"updated": [], "invalid_transition": [], "already_final": [], "not_found": []}
 
         for order_id in order_ids:
             order = storage.get_order(order_id)
             if not order:
-                print(f"Order {order_id} not found")
+                print(f"[Error] Order ID {order_id} not found.")
+                results["not_found"].append(order_id)
                 continue
 
             # Display current status
@@ -216,13 +226,13 @@ class UpdateStatusCommand(Command):
 
             # Check if already in final state
             if current_status in ["delivered", "canceled"]:
-                print(f"  Cannot update: Order already in final state '{current_status}'")
+                print(f"[Error] Cannot update Order ID {order_id}. Already in final state '{current_status}'.")
                 results["already_final"].append(order_id)
                 continue
 
             # Check if transition is valid
             if status not in self.VALID_TRANSITIONS[current_status]:
-                print(f"  Invalid transition: {current_status} → {status}")
+                print(f"[Error] Invalid transition from '{current_status}' to '{status}' for Order ID {order_id}.")
                 results["invalid_transition"].append(order_id)
                 continue
 
@@ -249,12 +259,13 @@ class UpdateStatusCommand(Command):
         print(f"  Updated: {len(results['updated'])} orders")
         print(f"  Invalid transitions: {len(results['invalid_transition'])} orders")
         print(f"  Already in final state: {len(results['already_final'])} orders")
+        print(f"  Not found: {len(results['not_found'])} orders")
 
     def _process_single_update(self, order_id, status, note, timestamp, storage):
         order = storage.get_order(order_id)
 
         if not order:
-            print(f"Order {order_id} not found")
+            print(f"[Error] Order ID {order_id} not found.")
             return
 
         # Get current status before update
@@ -263,12 +274,12 @@ class UpdateStatusCommand(Command):
 
         # Check if already in final state
         if current_status in ["delivered", "canceled"]:
-            print(f"Cannot update: Order already in final state '{current_status}'")
+            print(f"[Error] Cannot update Order ID {order_id}. Already in final state '{current_status}'.")
             return
 
         # Check if transition is valid
         if status not in self.VALID_TRANSITIONS[current_status]:
-            print(f"Invalid transition: {current_status} → {status}")
+            print(f"[Error] Invalid transition from '{current_status}' to '{status}' for Order ID {order_id}.")
             return
 
         # Update the order status

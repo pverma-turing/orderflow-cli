@@ -21,34 +21,22 @@ class StatusHistoryCommand(Command):
             try:
                 since_timestamp = datetime.datetime.fromisoformat(args.since)
             except ValueError:
-                print(f"Error: Invalid timestamp format '{args.since}'. Please use ISO format (YYYY-MM-DDThh:mm)")
+                print(f"[Error] Invalid timestamp format '{args.since}'. Please use ISO format (YYYY-MM-DDThh:mm).")
                 return
 
+        # Get the order and handle not found error
         order = self.storage.get_order(args.id)
-
         if not order:
-            print(f"Order {args.id} not found")
+            print(f"[Error] Order ID {args.id} not found.")
             return
 
         # Display order metadata header - common to all display modes
         self._display_order_metadata(order, args.id)
 
         # Handle orders without status_history (backward compatibility)
-        if not hasattr(order, 'status_history'):
-            if since_timestamp:
-                order_time_dt = datetime.datetime.fromisoformat(order.order_time)
-                if order_time_dt < since_timestamp:
-                    print(f"No status changes since {args.since}")
-                    return
-
-            if args.audit:
-                print("--- STATUS AUDIT LOG ---")
-                print(f"[{order.order_time}] Status set to: {order.status}")
-                print("--- END OF AUDIT LOG ---")
-                return
-            else:
-                print("No recorded status transitions available.")
-                return
+        if not hasattr(order, 'status_history') or not order.status_history:
+            print(f"[Error] No status history available for Order ID {args.id}.")
+            return
 
         # Filter history entries if --since is provided
         filtered_history = order.status_history
@@ -62,7 +50,7 @@ class StatusHistoryCommand(Command):
 
         # Check if we have any matching entries after filtering
         if not filtered_history:
-            print(f"No status changes since {args.since}")
+            print(f"No status changes since {args.since}.")
             return
 
         # Handle audit log format
