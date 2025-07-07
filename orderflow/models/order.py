@@ -85,7 +85,16 @@ class Order:
 
         # Handle notes (allow empty notes)
         self.notes = notes or ""
-        self.status_history = status_history or [(self.order_time, self.status)]
+        if status_history is None:
+            self.status_history = [(self.order_time, self.status, None)]
+        else:
+            # Handle backward compatibility with old format (timestamp, status)
+            self.status_history = []
+            for entry in status_history:
+                if len(entry) == 2:  # Old format without note
+                    self.status_history.append((entry[0], entry[1], None))
+                else:
+                    self.status_history.append(entry)  # New for
 
     def _parse_dishes(self, dishes):
         """

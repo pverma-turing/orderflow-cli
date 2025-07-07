@@ -53,6 +53,7 @@ class UpdateStatusCommand(Command):
             action='store_true',
             help='Show detailed information about each updated order'
         )
+        parser.add_argument("--note", help="Optional note to associate with this status change")
 
         # Add examples to epilog
         parser.epilog = """
@@ -118,10 +119,10 @@ Examples:
 
         # Initialize status_history if it doesn't exist (backward compatibility)
         if not hasattr(order, 'status_history'):
-            order.status_history = [(order.order_time, "new")]
+            order.status_history = [(order.order_time, "new", None)]
 
         # Add new status to history
-        order.status_history.append((timestamp, args.status))
+        order.status_history.append((timestamp, args.status, args.note))
 
         # Save the updated order
         updated_order = self.storage.save_order(order)
@@ -211,10 +212,10 @@ Examples:
             order.status = args.status
             # Initialize status_history if it doesn't exist (backward compatibility)
             if not hasattr(order, 'status_history'):
-                order.status_history = [(order.order_time, "new")]
+                order.status_history = [(order.order_time, "new", None)]
 
             # Add new status to history
-            order.status_history.append((timestamp, args.status))
+            order.status_history.append((timestamp, args.status, args.note))
 
             # Add to batch update list
             to_update.append(order)
