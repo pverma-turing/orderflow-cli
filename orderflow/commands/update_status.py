@@ -26,8 +26,16 @@ class UpdateStatusCommand(Command):
         parser.add_argument("--id", help="ID of order to update")
         parser.add_argument("--ids", nargs="+", help="IDs of orders to update (not valid with --rollback)")
         parser.add_argument("--note", help="Optional note to associate with this status change")
+        parser.add_argument("--show-history", action="store_true",
+                            help="Show the status history before applying changes (only works with --id)")
 
     def execute(self, args):
+        # Check for invalid show-history combinations
+        if args.show_history and args.ids:
+            print("Warning: --show-history is ignored when using --ids for batch updates")
+        elif args.show_history and args.rollback:
+            print("Warning: --show-history is ignored when using --rollback")
+
         # Validate arguments
         if args.rollback:
             if args.ids:
@@ -50,10 +58,93 @@ class UpdateStatusCommand(Command):
             if args.ids:
                 self._process_batch_update(args.ids, args.status, args.note, timestamp, self.storage)
             elif args.id:
+                # Show history if requested (and if using --id)
+                if args.show_history:
+                    self._display_status_history(args.id, self.storage)
+                    print()  # Add blank line for separation
+
                 self._process_single_update(args.id, args.status, args.note, timestamp, self.storage)
             else:
                 # Interactive mode for single order update
-                self._process_interactive_update(args.status, args.note, timestamp, self.storage)
+                self._process_interactive_update(args.status, args.note, args.show_history, timestamp, self.storage)
+
+    def _display_status_history(self, order_id, storage):
+        """Display the order's status history in tabular format."""
+        order = storage.get_order(order_id)
+
+        if not order:
+            print(f"Order {order_id} not found")
+            return False
+
+        # Handle orders without status_history (backward compatibility)
+        if not hasattr(order, 'status_history'):
+            print(f"Order {order_id} - {order.customer_name}")
+            print("No status history recorded. Only current status is available.")
+            print(f"Current status: {order.status} (since order creation)")
+            return True
+
+        # Display order information and status history header
+        print(f"Order {order_id} - {order.customer_name}")
+        print(f"Created: {order.order_time}")
+        print("\nStatus History:")
+
+        # Determine table width based on content
+        has_notes = any(len(entry) > 2 and entry[2] for entry in order.status_history)
+        if has_notes:
+            print("-" * 90)
+            print(f"{'Timestamp':<25} {'Status':<15} {'Duration':<15} {'Note'}")
+            print("-" * 90)
+        else:
+            print("-" * 60)
+            print(f"{'Timestamp':<25} {'Status':<15} {'Duration':<15}")
+            print("-" * 60)
+
+        # Loop through history entries
+        prev_time = None
+        for i, entry in enumerate(order.status_history):
+            # Handle different entry formats (backward compatibility)
+            if len(entry) == 2:  # Old format: (timestamp, status)
+                timestamp, status, note = entry[0], entry[1], None
+            else:  # New format: (timestamp, status, note)
+                timestamp, status, note = entry
+
+            # Format the timestamp for display
+            dt = datetime.datetime.fromisoformat(timestamp)
+            formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Calculate duration
+            duration = ""
+            if i > 0 and prev_time:
+                prev_dt = datetime.datetime.fromisoformat(prev_time)
+                delta = dt - prev_dt
+                duration = str(delta).split('.')[0]  # Remove microseconds
+
+            # Print row with or without note
+            if has_notes:
+                note_text = note if note else ""
+                print(f"{formatted_time:<25} {status:<15} {duration:<15} {note_text}")
+            else:
+                print(f"{formatted_time:<25} {status:<15} {duration:<15}")
+
+            prev_time = timestamp
+
+        # Print footer line with appropriate width
+        if has_notes:
+            print("-" * 90)
+        else:
+            print("-" * 60)
+
+        # Calculate and display total time since order creation
+        if len(order.status_history) > 0:
+            first_timestamp = order.status_history[0][0]
+            first_dt = datetime.datetime.fromisoformat(first_timestamp)
+            current_dt = datetime.datetime.now()
+            total_time = current_dt - first_dt
+            print(f"Total time since order creation: {str(total_time).split('.')[0]}")
+
+        # Display current status
+        print(f"Current status: {order.status}")
+        return True
 
     def _format_timestamp_for_display(self, timestamp):
         """Convert ISO timestamp to human-readable format."""
@@ -97,7 +188,7 @@ class UpdateStatusCommand(Command):
         order.status = previous_status
 
         # Save the updated order
-        storage.update_order(order)
+        storage.save_order(order)
 
         # Show rollback confirmation with details
         rolled_back_from = most_recent[1]
@@ -146,7 +237,7 @@ class UpdateStatusCommand(Command):
             order.status_history.append((timestamp, status, note))
 
             # Save the updated order
-            storage.update_order(order)
+            storage.save_order(order)
 
             # Display summary of the status change
             self._display_status_change_summary(order_id, current_status, status, timestamp, note)
@@ -191,11 +282,17 @@ class UpdateStatusCommand(Command):
         order.status_history.append((timestamp, status, note))
 
         # Save the updated order
-        storage.update_order(order)
+        storage.save_order(order)
 
         # Display summary of the status change
         self._display_status_change_summary(order_id, current_status, status, timestamp, note)
 
-    def _process_interactive_update(self, status, note, timestamp, storage):
+    def _process_interactive_update(self, status, note, show_history, timestamp, storage):
         order_id = input("Enter order ID: ").strip()
+
+        # Show history if requested
+        if show_history:
+            self._display_status_history(order_id, storage)
+            print()  # Add blank line for separation
+
         self._process_single_update(order_id, status, note, timestamp, storage)
