@@ -6,6 +6,8 @@ from orderflow.commands.base import Command
 class StatusHistoryCommand(Command):
     def add_arguments(self, parser):
         parser.add_argument("--id", required=True, help="ID of the order to show status history")
+        parser.add_argument("--audit", action="store_true",
+                            help="Display history in plain-text audit log format")
 
     def __init__(self, storage):
         self.storage = storage
@@ -19,13 +21,51 @@ class StatusHistoryCommand(Command):
 
         # Handle orders without status_history (backward compatibility)
         if not hasattr(order, 'status_history'):
-            print(f"Order {args.id} - {order.customer_name}")
-            print("No status history recorded. Only current status is available.")
-            print(f"Current status: {order.status} (since order creation)")
-            return
+            if args.audit:
+                print(f"ORDER: {args.id} | CUSTOMER: {order.customer_name}")
+                print(f"[{order.order_time}] Status set to: {order.status}")
+                return
+            else:
+                print(f"Order {args.id} - {order.customer_name}")
+                print("No status history recorded. Only current status is available.")
+                print(f"Current status: {order.status} (since order creation)")
+                return
 
+        # Handle audit log format
+        if args.audit:
+            self._display_audit_log(order, args.id)
+        else:
+            self._display_table_format(order)
+
+    def _display_audit_log(self, order, order_id):
+        """Display status history in plain-text audit log format."""
+        # Print order header info
+        print(f"ORDER: {order_id} | CUSTOMER: {order.customer_name}")
+        print(f"CREATED: {order.order_time}")
+        print("--- STATUS AUDIT LOG ---")
+
+        # Print each status change in chronological order
+        for entry in order.status_history:
+            # Handle different entry formats (backward compatibility)
+            if len(entry) == 2:  # Old format: (timestamp, status)
+                timestamp, status, note = entry[0], entry[1], None
+            else:  # New format: (timestamp, status, note)
+                timestamp, status, note = entry
+
+            # Format the log entry
+            log_entry = f"[{timestamp}] Status changed to: {status}"
+            if note:
+                log_entry += f" [Note: {note}]"
+
+            print(log_entry)
+
+        # Print a separator to mark the end of the log
+        print("--- END OF AUDIT LOG ---")
+
+    def _display_table_format(self, order):
+        """Display status history in tabular format."""
         # Display order information and status history header
-        print(f"Order {args.id} - {order.customer_name}")
+        print(f"Order {order.order_id} - {order.customer_name}")
         print(f"Created: {order.order_time}")
         print("\nStatus History:")
 
