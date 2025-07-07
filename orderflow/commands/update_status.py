@@ -8,6 +8,12 @@ class UpdateStatusCommand(Command):
     """Command to update the status of one or multiple orders"""
 
     VALID_STATUSES = Order.VALID_STATUSES
+    VALID_TRANSITIONS = {
+        "new": ["preparing", "canceled"],
+        "preparing": ["delivered", "canceled"],
+        "delivered": [],  # No further transitions allowed
+        "canceled": []  # No further transitions allowed
+    }
 
     def __init__(self, storage):
         self.storage = storage
@@ -93,6 +99,11 @@ Examples:
 
         # Update the status
         old_status = order.status
+        # Check if transition is valid
+        if args.status not in self.VALID_TRANSITIONS[order.status]:
+            print(f"  Invalid transition: {order.status} → {args.status}")
+            return None
+
         order.status = args.status
 
         # Save the updated order
@@ -160,6 +171,14 @@ Examples:
 
             # Store old status for reporting
             old_status = order.status
+            # Check if transition is valid
+            if args.status not in self.VALID_TRANSITIONS[order.status]:
+                print(f"  Invalid transition: {order.status} → {args.status}")
+                results_data.append([order_id[:8] + "...",
+                    "Unchanged",
+                    args.status,
+                    "invalid_transition"])
+                continue
 
             # Update the status
             order.status = args.status
