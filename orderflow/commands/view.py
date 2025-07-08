@@ -124,6 +124,10 @@ class ViewCommand(Command):
         report_group.add_argument("--report-sort",
                             help="Control sorting of summary reports: 'revenue', 'count', 'quantity', 'avg', 'total'")
 
+        # New customer summary flag
+        report_group.add_argument("--customer-summary", action="store_true",
+                            help="Show a full alphabetical list of customer order statistics")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -224,6 +228,9 @@ Examples:
 
             if args.top_tags:
                 self._display_top_tags(filtered_orders, "", args.report_sort)
+
+            if args.customer_summary:
+                self._display_customer_summary(filtered_orders, "")
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -828,3 +835,63 @@ Examples:
         use_grid = self._should_use_grid_format()
         print(tabulate(table_data, headers=headers, tablefmt="grid" if use_grid else "simple"))
         print(f"\nTotal Revenue: ${total_revenue:.2f}")
+
+    def _display_customer_summary(self, orders, filter_description):
+        """Display a comprehensive alphabetical list of all customers with their order statistics."""
+        # Aggregate customer data
+        customer_data = {}
+
+        # First pass - collect customer data
+        for order in orders:
+            customer_name = order.customer_name
+            if not customer_name or not isinstance(customer_name, str):
+                continue  # Skip orders with no customer name
+
+            # Initialize customer data if not already present
+            if customer_name not in customer_data:
+                customer_data[customer_name] = {
+                    "order_count": 0,
+                    "total_spent": 0.0
+                }
+
+            # Update customer data
+            customer_data[customer_name]["order_count"] += 1
+            customer_data[customer_name]["total_spent"] += order.order_total
+
+        # Create filter message
+        filter_msg = f" (filtered by: {filter_description})" if filter_description else ""
+
+        # Display the table header
+        print(f"\nCustomer Order Summary{filter_msg}")
+
+        if not customer_data:
+            print("No customer data available for the current filters.")
+            return
+
+        # Prepare the table data sorted alphabetically by customer name
+        table_data = []
+        for customer_name in sorted(customer_data.keys()):
+            data = customer_data[customer_name]
+            order_count = data["order_count"]
+            total_spent = data["total_spent"]
+            avg_order_value = total_spent / order_count if order_count > 0 else 0
+
+            table_data.append([
+                customer_name,
+                order_count,
+                f"${total_spent:.2f}",
+                f"${avg_order_value:.2f}"
+            ])
+
+        headers = ["Customer Name", "Order Count", "Total Spent", "Avg Order Value"]
+
+        # Use the same tabulate format as other reports
+        use_grid = self._should_use_grid_format()
+        print(tabulate(table_data, headers=headers, tablefmt="grid" if use_grid else "simple"))
+
+        # Add a summary footer
+        total_customers = len(customer_data)
+        total_orders = sum(data["order_count"] for data in customer_data.values())
+        total_revenue = sum(data["total_spent"] for data in customer_data.values())
+
+        print(f"\nSummary: {total_customers} customers, {total_orders} orders, ${total_revenue:.2f} total revenue")
