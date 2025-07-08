@@ -113,6 +113,9 @@ class ViewCommand(Command):
             help='Display the top 5 customers by number of orders'
         )
 
+        report_group.add_argument("--dish-breakdown", action="store_true",
+                            help="Show complete breakdown of all dishes in matching orders sorted by revenue")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -207,6 +210,9 @@ Examples:
                          args.today, args.dish, args.customer, args.tag,
                          args.with_notes, args.without_notes])):
                     return filtered_orders
+
+            if args.dish_breakdown:
+                self._display_dish_breakdown(filtered_orders, "")
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -602,3 +608,69 @@ Examples:
             return columns >= 100  # Use grid format for wider terminals
         except (AttributeError, OSError):
             return False
+
+    def _display_dish_breakdown(self, orders, filter_description):
+        """Display complete breakdown of all dishes ordered, sorted by revenue."""
+        # Aggregate dish data (reusing logic from _display_top_dishes)
+        dish_data = {}
+        total_revenue = 0.0
+
+        # First pass - collect dish data
+        for order in orders:
+            for dish_item in order.dishes:
+                try:
+                    # Parse dish format (Dish Name:Quantity)
+                    dish_name = dish_item['name']
+                    quantity = dish_item['quantity']
+
+                    if not dish_name:
+                        continue
+
+                    if dish_name not in dish_data:
+                        dish_data[dish_name] = {"quantity": 0, "revenue": 0.0}
+
+                    dish_data[dish_name]["quantity"] += quantity
+
+                    # Estimate revenue based on proportion of the total order
+                    total_qty_in_order = sum(int(d.split(":")[1].strip()) if ":" in d else 1 for d in order.dishes)
+                    dish_proportion = quantity / total_qty_in_order if total_qty_in_order > 0 else 0
+                    dish_revenue = order.order_total * dish_proportion
+
+                    dish_data[dish_name]["revenue"] += dish_revenue
+                    total_revenue += dish_revenue
+
+                except (IndexError, ValueError, ZeroDivisionError):
+                    # Skip malformed dish entries
+                    continue
+
+        # Create filter message
+        filter_msg = f" (filtered by: {filter_description})" if filter_description else ""
+
+        # Display the table header
+        print(f"\nComplete Dish Breakdown{filter_msg}")
+        if not dish_data:
+            print("No dish data available for the current filters.")
+            return
+
+        # Prepare the table data sorted by revenue (descending)
+        table_data = []
+        for dish_name, data in sorted(dish_data.items(), key=lambda x: x[1]["revenue"], reverse=True):
+            quantity = data["quantity"]
+            revenue = data["revenue"]
+            avg_revenue = revenue / quantity if quantity > 0 else 0
+            revenue_percentage = (revenue / total_revenue * 100) if total_revenue > 0 else 0
+
+            table_data.append([
+                dish_name,
+                quantity,
+                f"${revenue:.2f}",
+                f"${avg_revenue:.2f}",
+                f"{revenue_percentage:.2f}%"
+            ])
+
+        headers = ["Dish Name", "Quantity", "Total Revenue", "Avg Revenue/Unit", "% of Revenue"]
+
+        # Use the same tabulate format as the main order listing
+        use_grid = self._should_use_grid_format()
+        print(tabulate(table_data, headers=headers, tablefmt="grid" if use_grid else "simple"))
+        print(f"\nTotal Revenue: ${total_revenue:.2f}")
