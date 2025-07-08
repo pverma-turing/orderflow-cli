@@ -120,6 +120,10 @@ class ViewCommand(Command):
         report_group.add_argument("--top-tags", action="store_true",
                                   help="Summarize order volume and revenue by tags across matching orders")
 
+        # New sorting control flag
+        report_group.add_argument("--report-sort",
+                            help="Control sorting of summary reports: 'revenue', 'count', 'quantity', 'avg', 'total'")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -198,7 +202,7 @@ Examples:
 
             # Handle summary reports (these can run even if filtered_orders is empty)
             if args.top_dishes:
-                self._display_top_dishes(all_orders, filtered_orders)
+                self._display_top_dishes(all_orders, filtered_orders, args.report_sort)
                 # If only summary is requested, return after displaying it
                 if not filtered_orders or (args.top_dishes and args.top_customers and not any(
                         [args.status, args.active_only, args.from_date, args.to_date,
@@ -207,7 +211,7 @@ Examples:
                     return filtered_orders
 
             if args.top_customers:
-                self._display_top_customers(all_orders, filtered_orders)
+                self._display_top_customers(all_orders, filtered_orders, args.report_sort)
                 # If only summary is requested, return after displaying it
                 if not filtered_orders or (args.top_dishes and args.top_customers and not any(
                         [args.status, args.active_only, args.from_date, args.to_date,
@@ -216,10 +220,10 @@ Examples:
                     return filtered_orders
 
             if args.dish_breakdown:
-                self._display_dish_breakdown(filtered_orders, "")
+                self._display_dish_breakdown(filtered_orders, "", args.report_sort)
 
             if args.top_tags:
-                self._display_top_tags(filtered_orders, "")
+                self._display_top_tags(filtered_orders, "", args.report_sort)
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -512,10 +516,11 @@ Examples:
         else:
             print("\nNo tagged orders found in the filtered results.")
 
-    def _display_top_dishes(self, all_orders, filtered_orders):
+    def _display_top_dishes(self, all_orders, filtered_orders, sort_by=None):
         """Display the top 5 most ordered dishes with quantities and accurate revenue"""
         orders_to_analyze = filtered_orders if filtered_orders else all_orders
-
+        valid_sorts = ["quantity", "revenue"]
+        default_sort = "quantity"
         # Create dish counters and revenue trackers
         dish_quantities = {}
         dish_revenue = {}
@@ -563,13 +568,39 @@ Examples:
                 f"${revenue / quantity:.2f}" if quantity > 0 else "$0.00"
             ])
 
+        # If sort_by is specified but invalid, show error and use default
+        if sort_by and sort_by not in valid_sorts:
+            print(
+                f"Error: Invalid sort option '{sort_by}' for dish report. Valid options are: {', '.join(valid_sorts)}")
+            print(f"Using default sort: '{default_sort}'\n")
+            sort_by = default_sort
+
+        # If sort_by not specified, use default
+        if not sort_by:
+            sort_by = default_sort
+        idx = valid_sorts.index(sort_by) +1
+        dish_data.sort(key=lambda x: x[idx], reverse=True)
         # Display table
         headers = ["Dish Name", "Quantity", "Total Revenue", "Avg. Per Unit"]
         print(tabulate(dish_data, headers=headers, tablefmt="grid"))
 
-    def _display_top_customers(self, all_orders, filtered_orders):
+    def _display_top_customers(self, all_orders, filtered_orders, sort_by=None):
         """Display the top 5 customers by number of orders"""
         orders_to_analyze = filtered_orders if filtered_orders else all_orders
+        # Validate sort parameter for customers
+        valid_sorts = ["count", "total", "avg"]
+        default_sort = "count"
+
+        # If sort_by is specified but invalid, show error and use default
+        if sort_by and sort_by not in valid_sorts:
+            print(
+                f"Error: Invalid sort option '{sort_by}' for customer report. Valid options are: {', '.join(valid_sorts)}")
+            print(f"Using default sort: '{default_sort}'\n")
+            sort_by = default_sort
+
+        # If sort_by not specified, use default
+        if not sort_by:
+            sort_by = default_sort
 
         # Count orders by customer
         customer_orders = {}
@@ -604,6 +635,9 @@ Examples:
                 f"${avg_order_value:.2f}"
             ])
 
+        idx = valid_sorts.index(sort_by) + 1
+        customer_data.sort(key=lambda x: x[idx], reverse=True)
+
         # Display table
         headers = ["Customer Name", "Order Count", "Total Spent", "Avg Order"]
         print(tabulate(customer_data, headers=headers, tablefmt="grid"))
@@ -616,8 +650,23 @@ Examples:
         except (AttributeError, OSError):
             return False
 
-    def _display_dish_breakdown(self, orders, filter_description):
+    def _display_dish_breakdown(self, orders, filter_description, sort_by=None):
         """Display complete breakdown of all dishes ordered, sorted by revenue."""
+        # Validate sort parameter for dish breakdown
+        valid_sorts = ["revenue", "quantity"]
+        default_sort = "revenue"
+
+        # If sort_by is specified but invalid, show error and use default
+        if sort_by and sort_by not in valid_sorts:
+            print(
+                f"Error: Invalid sort option '{sort_by}' for dish breakdown. Valid options are: {', '.join(valid_sorts)}")
+            print(f"Using default sort: '{default_sort}'\n")
+            sort_by = default_sort
+
+        # If sort_by not specified, use default
+        if not sort_by:
+            sort_by = default_sort
+
         # Aggregate dish data (reusing logic from _display_top_dishes)
         dish_data = {}
         total_revenue = 0.0
@@ -675,6 +724,9 @@ Examples:
                 f"{revenue_percentage:.2f}%"
             ])
 
+        idx = valid_sorts.index(sort_by) + 1
+        table_data.sort(key=lambda x: x[idx], reverse=True)
+
         headers = ["Dish Name", "Quantity", "Total Revenue", "Avg Revenue/Unit", "% of Revenue"]
 
         # Use the same tabulate format as the main order listing
@@ -682,9 +734,23 @@ Examples:
         print(tabulate(table_data, headers=headers, tablefmt="grid" if use_grid else "simple"))
         print(f"\nTotal Revenue: ${total_revenue:.2f}")
 
-    def _display_top_tags(self, orders, filter_description):
+    def _display_top_tags(self, orders, filter_description, sort_by=None):
         """Display summary of order volume and revenue by tags."""
         # Aggregate tag data
+        # Validate sort parameter for tags
+        valid_sorts = ["revenue", "count"]
+        default_sort = "revenue"
+
+        # If sort_by is specified but invalid, show error and use default
+        if sort_by and sort_by not in valid_sorts:
+            print(f"Error: Invalid sort option '{sort_by}' for tag report. Valid options are: {', '.join(valid_sorts)}")
+            print(f"Using default sort: '{default_sort}'\n")
+            sort_by = default_sort
+
+        # If sort_by not specified, use default
+        if not sort_by:
+            sort_by = default_sort
+
         tag_data = {}
         total_revenue = 0.0
 
@@ -754,6 +820,8 @@ Examples:
                 f"{revenue_percentage:.2f}%"
             ])
 
+        idx = valid_sorts.index(sort_by) + 1
+        table_data.sort(key=lambda x: x[idx], reverse=True)
         headers = ["Tag", "Order Count", "Total Revenue", "% of Revenue"]
 
         # Use the same tabulate format as the main order listing
