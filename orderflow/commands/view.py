@@ -116,6 +116,10 @@ class ViewCommand(Command):
         report_group.add_argument("--dish-breakdown", action="store_true",
                             help="Show complete breakdown of all dishes in matching orders sorted by revenue")
 
+        # New tags summary flag
+        report_group.add_argument("--top-tags", action="store_true",
+                                  help="Summarize order volume and revenue by tags across matching orders")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -213,6 +217,9 @@ Examples:
 
             if args.dish_breakdown:
                 self._display_dish_breakdown(filtered_orders, "")
+
+            if args.top_tags:
+                self._display_top_tags(filtered_orders, "")
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -669,6 +676,85 @@ Examples:
             ])
 
         headers = ["Dish Name", "Quantity", "Total Revenue", "Avg Revenue/Unit", "% of Revenue"]
+
+        # Use the same tabulate format as the main order listing
+        use_grid = self._should_use_grid_format()
+        print(tabulate(table_data, headers=headers, tablefmt="grid" if use_grid else "simple"))
+        print(f"\nTotal Revenue: ${total_revenue:.2f}")
+
+    def _display_top_tags(self, orders, filter_description):
+        """Display summary of order volume and revenue by tags."""
+        # Aggregate tag data
+        tag_data = {}
+        total_revenue = 0.0
+
+        # First pass - collect tag data
+        for order in orders:
+            # Skip orders without tags
+            if not order.tags or not isinstance(order.tags, list):
+                continue
+
+            # Add order revenue to total (will be used for percentage calculation)
+            total_revenue += order.order_total
+
+            # Process each tag in the order
+            for tag in order.tags:
+                # Skip empty tags
+                if not tag or not isinstance(tag, str):
+                    continue
+
+                # Normalize tag (case-insensitive aggregation)
+                normalized_tag = tag.lower().strip()
+                if not normalized_tag:
+                    continue
+
+                # Initialize tag data if not already present
+                if normalized_tag not in tag_data:
+                    tag_data[normalized_tag] = {
+                        "order_count": 0,
+                        "revenue": 0.0,
+                        "display_name": tag  # Keep original capitalization for display
+                    }
+
+                # Update tag data
+                tag_data[normalized_tag]["order_count"] += 1
+                tag_data[normalized_tag]["revenue"] += order.order_total
+
+                # Update display name with most common capitalization
+                # This keeps the most frequently used capitalization
+                if tag != tag_data[normalized_tag]["display_name"]:
+                    # Simple heuristic: longer tag is likely more intentional formatting
+                    if len(tag) > len(tag_data[normalized_tag]["display_name"]):
+                        tag_data[normalized_tag]["display_name"] = tag
+
+        # Create filter message
+        filter_msg = f" (filtered by: {filter_description})" if filter_description else ""
+
+        # Display the table header
+        print(f"\nTag Summary{filter_msg}")
+
+        if not tag_data:
+            print("No tagged orders found with the current filters.")
+            return
+
+        # Prepare the table data sorted by revenue (descending)
+        table_data = []
+        for normalized_tag, data in sorted(tag_data.items(), key=lambda x: x[1]["revenue"], reverse=True):
+            order_count = data["order_count"]
+            revenue = data["revenue"]
+            revenue_percentage = (revenue / total_revenue * 100) if total_revenue > 0 else 0
+
+            # Use the preserved display name for better readability
+            display_name = data["display_name"]
+
+            table_data.append([
+                display_name,
+                order_count,
+                f"${revenue:.2f}",
+                f"{revenue_percentage:.2f}%"
+            ])
+
+        headers = ["Tag", "Order Count", "Total Revenue", "% of Revenue"]
 
         # Use the same tabulate format as the main order listing
         use_grid = self._should_use_grid_format()
