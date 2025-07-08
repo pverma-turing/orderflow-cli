@@ -1,4 +1,6 @@
 import argparse
+import shutil
+
 from orderflow.commands.base import Command
 from tabulate import tabulate
 from datetime import datetime, date, timedelta
@@ -592,3 +594,11 @@ Examples:
         # Display table
         headers = ["Customer Name", "Order Count", "Total Spent", "Avg Order"]
         print(tabulate(customer_data, headers=headers, tablefmt="grid"))
+
+    def _should_use_grid_format(self):
+        """Determine if grid format should be used based on terminal width."""
+        try:
+            columns, _ = shutil.get_terminal_size()
+            return columns >= 100  # Use grid format for wider terminals
+        except (AttributeError, OSError):
+            return False
