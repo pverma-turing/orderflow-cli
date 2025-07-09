@@ -1,4 +1,7 @@
 import argparse
+
+from tabulate import tabulate
+
 from .base import Command
 
 
@@ -35,6 +38,46 @@ class DeleteCommand(Command):
             help="Skip confirmation and force deletion"
         )
 
+    def _format_dishes(self, dishes):
+        """Format dish list for display."""
+        if not dishes:
+            return "None"
+
+        dish_strings = []
+        for dish in dishes[:3]:  # Display up to 3 dishes to keep the output clean
+            dish_strings.append(dish)
+
+        if len(dishes) > 3:
+            dish_strings.append(f"...and {len(dishes) - 3} more")
+
+        return "\n".join(dish_strings)
+
+    def _format_order_preview(self, order):
+        """Create a formatted preview of the order in tabular format."""
+        # Create a table with key order details
+        headers = ["Order ID", "Customer", "Time", "Status", "Total", "Dishes"]
+
+        # Format dishes for display
+        formatted_dishes = self._format_dishes(order.dishes)
+
+        # Format monetary value
+        formatted_total = f"${order.order_total:.2f}"
+
+        # Create a single row with the order details
+        row = [
+            order.order_id,
+            order.customer_name,
+            order.order_time,
+            order.status,
+            formatted_total,
+            formatted_dishes
+        ]
+
+        # Generate table using tabulate with grid format
+        table = tabulate([row], headers=headers, tablefmt="grid")
+
+        return table
+
     def execute(self, args):
         """Execute the delete operation."""
         try:
@@ -51,6 +94,7 @@ class DeleteCommand(Command):
                 print("Warning: Both --order-id and customer/time provided. Using --order-id for lookup.")
 
             # Find the order
+            order = None
             if using_id:
                 order = self.storage.get_order(args.order_id)
                 if not order:
@@ -70,24 +114,32 @@ class DeleteCommand(Command):
                     print(
                         f"Error: Multiple orders found for customer '{args.customer_name}' at time '{args.order_time}'.")
                     print("Please use --order-id to specify which order to delete.")
-                    print("Matching order IDs:")
-                    for order in matching_orders:
-                        print(f"  - {order.order_id} (status: {order.status}, total: ${order.order_total:.2f})")
+                    print("\nMatching orders:")
+
+                    # Display matching orders in a tabular format
+                    headers = ["Order ID", "Customer", "Time", "Status", "Total"]
+                    rows = []
+                    for match in matching_orders:
+                        rows.append([
+                            match.order_id,
+                            match.customer_name,
+                            match.order_time,
+                            match.status,
+                            f"${match.order_total:.2f}"
+                        ])
+                    print(tabulate(rows, headers=headers, tablefmt="grid"))
                     return False
 
                 order = matching_orders[0]
                 order_id = order.order_id
 
-            # Get confirmation unless --force is used
+            # Display order preview unless --force is used
             if not args.force:
-                # Display some order details to help confirm it's the right order
-                print(f"Order #{order_id}:")
-                print(f"  Customer: {order.customer_name}")
-                print(f"  Time: {order.order_time}")
-                print(f"  Status: {order.status}")
-                print(f"  Total: ${order.order_total:.2f}")
+                print("\nOrder to Delete:")
+                print(self._format_order_preview(order))
 
-                confirmation = input(f"\nAre you sure you want to delete order #{order_id}? (y/n): ")
+                # Request confirmation
+                confirmation = input(f"\nAre you sure you want to delete this order? (y/n): ")
                 if confirmation.lower() not in ["y", "yes"]:
                     print("Deletion cancelled.")
                     return False
