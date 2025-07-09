@@ -128,6 +128,10 @@ class ViewCommand(Command):
         report_group.add_argument("--customer-summary", action="store_true",
                             help="Show a full alphabetical list of customer order statistics")
 
+        # New day summary flag
+        report_group.add_argument("--day-summary", action="store_true",
+                            help="Show revenue trends by day for the filtered orders")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -231,6 +235,9 @@ Examples:
 
             if args.customer_summary:
                 self._display_customer_summary(filtered_orders, "")
+
+            if args.day_summary:
+                self._display_day_summary(filtered_orders, "")
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -895,3 +902,84 @@ Examples:
         total_revenue = sum(data["total_spent"] for data in customer_data.values())
 
         print(f"\nSummary: {total_customers} customers, {total_orders} orders, ${total_revenue:.2f} total revenue")
+
+    def _display_day_summary(self, orders, filter_description):
+        """Display revenue trends by day for the filtered orders."""
+        from datetime import datetime
+
+        # Dictionary to store data aggregated by day
+        daily_data = {}
+
+        # First pass - collect data by day
+        for order in orders:
+            # Skip orders without a valid order_time
+            if not hasattr(order, 'order_time') or not order.order_time:
+                continue
+
+            # Convert order_time to datetime if it's a string
+            order_date = order.order_time
+            if isinstance(order_date, str):
+                try:
+                    # Try to parse the date string (handle different formats)
+                    order_date = datetime.strptime(order_date.split(' ')[0], '%Y-%m-%d')
+                except (ValueError, IndexError):
+                    try:
+                        order_date = datetime.strptime(order_date.split('T')[0], '%Y-%m-%d')
+                    except (ValueError, IndexError):
+                        # Skip orders with unparseable dates
+                        continue
+
+            # Extract just the date part (YYYY-MM-DD)
+            date_key = order_date.strftime('%Y-%m-%d') if hasattr(order_date, 'strftime') else \
+            str(order_date).split(' ')[0]
+
+            # Initialize day data if not already present
+            if date_key not in daily_data:
+                daily_data[date_key] = {
+                    "order_count": 0,
+                    "total_revenue": 0.0
+                }
+
+            # Update daily data
+            daily_data[date_key]["order_count"] += 1
+            daily_data[date_key]["total_revenue"] += order.order_total
+
+        # Create filter message
+        filter_msg = f" (filtered by: {filter_description})" if filter_description else ""
+
+        # Display the table header
+        print(f"\nDaily Revenue Summary{filter_msg}")
+
+        if not daily_data:
+            print("No order data available for the current filters.")
+            return
+
+        # Prepare the table data sorted by date (ascending)
+        table_data = []
+        for date_key in sorted(daily_data.keys()):
+            data = daily_data[date_key]
+            order_count = data["order_count"]
+            total_revenue = data["total_revenue"]
+            avg_order_value = total_revenue / order_count if order_count > 0 else 0
+
+            table_data.append([
+                date_key,
+                order_count,
+                f"${total_revenue:.2f}",
+                f"${avg_order_value:.2f}"
+            ])
+
+        headers = ["Date", "Order Count", "Total Revenue", "Avg Order Value"]
+
+        # Use the same tabulate format as other reports
+        use_grid = self._should_use_grid_format()
+        print(tabulate(table_data, headers=headers, tablefmt="grid" if use_grid else "simple"))
+
+        # Add a summary footer
+        total_days = len(daily_data)
+        total_orders = sum(data["order_count"] for data in daily_data.values())
+        total_revenue = sum(data["total_revenue"] for data in daily_data.values())
+        overall_avg = total_revenue / total_orders if total_orders > 0 else 0
+
+        print(f"\nSummary: {total_days} days, {total_orders} orders, ${total_revenue:.2f} total revenue")
+        print(f"Overall average order value: ${overall_avg:.2f}")
