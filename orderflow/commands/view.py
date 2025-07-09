@@ -138,6 +138,9 @@ class ViewCommand(Command):
         report_group.add_argument("--hourly-distribution", action="store_true",
                             help="Show order distribution by hour of day (0-23)")
 
+        report_group.add_argument("--cancel-rate", action="store_true",
+                            help="Show percentage of canceled orders within the filtered dataset")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -250,6 +253,9 @@ Examples:
 
             if args.hourly_distribution:
                 self._display_hourly_distribution(filtered_orders, "")
+
+            if args.cancel_rate:
+                self._display_cancel_rate(filtered_orders, "")
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -1164,3 +1170,45 @@ Examples:
         print(f"Peak order hour: {peak_hour_display} ({hourly_data[peak_hour]['order_count']} orders)")
         print(
             f"Peak revenue hour: {peak_revenue_hour_display} (${hourly_data[peak_revenue_hour]['total_revenue']:.2f})")
+
+    def _display_cancel_rate(self, orders, filter_description):
+        """Display the cancellation rate for the filtered orders."""
+        # Create filter message
+        filter_msg = f" (filtered by: {filter_description})" if filter_description else ""
+
+        # Display the header
+        print(f"\nCancellation Rate Analysis{filter_msg}")
+
+        if not orders:
+            print("No orders match the current filters.")
+            return
+
+        # Count total orders and canceled orders
+        total_orders = len(orders)
+        canceled_orders = sum(1 for order in orders if hasattr(order, 'status') and order.status == "canceled")
+
+        # Calculate cancellation rate
+        cancellation_rate = (canceled_orders / total_orders) * 100 if total_orders > 0 else 0
+
+        # Create a simple box display for the results
+        print("┌─────────────────────────────────────────────┐")
+        print(f"│ Total Orders:      {total_orders:6d}                  │")
+        print(f"│ Canceled Orders:   {canceled_orders:6d}                  │")
+        print(f"│ Cancellation Rate: {cancellation_rate:6.2f}%                 │")
+        print("└─────────────────────────────────────────────┘")
+
+        # Add some contextual analysis based on the rate
+        if cancellation_rate == 0:
+            print("\nExcellent! No canceled orders in this dataset.")
+        elif cancellation_rate < 5:
+            print("\nLow cancellation rate. This indicates good operational efficiency.")
+        elif cancellation_rate < 10:
+            print("\nModerate cancellation rate. Consider reviewing order fulfillment processes.")
+        elif cancellation_rate < 15:
+            print("\nElevated cancellation rate. This may indicate operational issues that need attention.")
+        else:
+            print("\nHigh cancellation rate. Immediate review of order handling processes recommended.")
+
+        # Add additional details if specific filters are active
+        if "status=" in filter_msg:
+            print("\nNote: The '--status' filter may affect the cancellation rate calculation.")
