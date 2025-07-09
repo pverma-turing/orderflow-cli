@@ -189,12 +189,16 @@ class DeleteCommand(Command):
 
         return tabulate(rows, headers=headers, tablefmt="grid")
 
-    def execute(self, args, storage):
+    def execute(self, args):
         """Execute the delete operation."""
+        if not (args.order_id or args.tag or (args.customer_name and args.order_time)):
+            print(
+                "Error: You must specify either --order-id, --tag, or both --customer-name and --order-time to delete an order.")
+            return
         try:
             # Check if we're using tag-based deletion
             if args.tag:
-                return self._handle_tag_deletion(args.tag, args.force, args.dry_run, storage)
+                return self._handle_tag_deletion(args.tag, args.force, args.dry_run, self.storage)
 
             # Early validation of order-time format if provided
             if args.order_time is not None:
@@ -218,12 +222,12 @@ class DeleteCommand(Command):
             # Find the order
             order = None
             if using_id:
-                order = storage.get_order(args.order_id)
+                order = self.storage.get_order(args.order_id)
                 if not order:
                     print(f"Error: Order with ID '{args.order_id}' not found.")
                     return False
             else:  # using customer name and time
-                matching_orders = storage.find_orders_by_customer_and_time(
+                matching_orders = self.storage.find_orders_by_customer_and_time(
                     args.customer_name, args.order_time
                 )
 
@@ -266,7 +270,7 @@ class DeleteCommand(Command):
             order_summary = self._format_order_summary(order)
 
             # Perform actual deletion
-            success = storage.delete_order(order_id)
+            success = self.storage.delete_order(order_id)
 
             if success:
                 print(f"Deleted order: {order_summary}")
