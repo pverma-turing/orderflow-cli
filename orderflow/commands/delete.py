@@ -1,4 +1,5 @@
 import argparse
+import re
 
 from tabulate import tabulate
 
@@ -7,6 +8,9 @@ from .base import Command
 
 class DeleteCommand(Command):
     """Command to delete orders from the system."""
+    # Add a class-level constant for the expected datetime format
+    DATETIME_FORMAT = "%Y-%m-%d %H:%M"
+    DATETIME_PATTERN = r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$"  # Regex to validate format
 
     def __init__(self, storage):
         self.storage = storage
@@ -29,7 +33,7 @@ class DeleteCommand(Command):
         id_group.add_argument(
             "--order-time",
             type=str,
-            help="Time of the order (use with --customer-name)"
+            help=f"Time of the order in format {self.DATETIME_FORMAT} (use with --customer-name)"
         )
         id_group.add_argument(
             "--tag",
@@ -49,6 +53,22 @@ class DeleteCommand(Command):
             help="Simulate deletion without actually removing any orders"
         )
 
+    def _validate_datetime_format(self, datetime_str):
+        """
+        Validate that the datetime string follows the expected format.
+
+        Args:
+            datetime_str (str): The datetime string to validate
+
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        if not datetime_str:
+            return False
+
+        # Use regex to strictly check the format
+        return bool(re.match(self.DATETIME_PATTERN, datetime_str))
+
     def _format_dishes(self, dishes):
         """Format dish list for display."""
         if not dishes:
@@ -56,7 +76,7 @@ class DeleteCommand(Command):
 
         dish_strings = []
         for dish in dishes[:3]:  # Display up to 3 dishes to keep the output clean
-            dish_strings.append(dish["name"])
+            dish_strings.append(dish)
 
         if len(dishes) > 3:
             dish_strings.append(f"...and {len(dishes) - 3} more")
@@ -67,6 +87,7 @@ class DeleteCommand(Command):
         """Create a formatted preview of the order in tabular format."""
         # Create a table with key order details
         headers = ["Order ID", "Customer", "Time", "Status", "Total", "Dishes"]
+
         # Format dishes for display
         formatted_dishes = self._format_dishes(order.dishes)
 
@@ -119,6 +140,12 @@ class DeleteCommand(Command):
             if args.tag:
                 return self._handle_tag_deletion(args.tag, args.force, args.dry_run, self.storage)
 
+            # Early validation of order-time format if provided
+            if args.order_time is not None:
+                if not self._validate_datetime_format(args.order_time):
+                    print(f"Error: Invalid order time format. Please use {self.DATETIME_FORMAT}")
+                    return False
+
             # Regular single-order deletion
             # Check for valid identification method
             using_id = args.order_id is not None
@@ -159,6 +186,7 @@ class DeleteCommand(Command):
 
                 order = matching_orders[0]
                 order_id = order.order_id
+
             # Display order preview unless --force is used
             if not args.force:
                 # Add dry-run indicator to the preview title if applicable
