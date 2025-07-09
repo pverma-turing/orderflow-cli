@@ -212,3 +212,46 @@ class JsonStorage(Storage):
             return saved_orders
 
         return []
+
+    def delete_order(self, order_id):
+        """
+        Delete an order from storage by its ID.
+
+        Args:
+            order_id (str): The ID of the order to delete
+
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+        try:
+            # Load all orders
+            orders = self.get_orders()
+
+            # Find order index
+            order_index = None
+            for i, order in enumerate(orders):
+                if order.order_id == order_id:
+                    order_index = i
+                    break
+
+            # If order not found, return False
+            if order_index is None:
+                return False
+
+            # Remove the order
+            orders.pop(order_index)
+
+            remaining_orders = []
+            for order in orders:
+                order_dict = order.to_dict()
+                remaining_orders.append(order_dict)
+
+
+            # Persist the change
+            self._write_all(remaining_orders)
+
+            return True
+        except Exception as e:
+            # Log the error if logging is set up
+            # self.logger.error(f"Error deleting order {order_id}: {e}")
+            return False

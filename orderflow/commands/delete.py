@@ -1,8 +1,4 @@
 import argparse
-import json
-import os
-from pathlib import Path
-
 from .base import Command
 
 
@@ -28,42 +24,32 @@ class DeleteCommand(Command):
 
     def execute(self, args):
         """Execute the delete operation."""
-        # Load all orders from storage
+        order_id = args.order_id
+
         try:
-            orders = self.storage.get_orders()
-
-            # Find the order by ID
-            order_id = args.order_id
-            found = False
-            order_index = None
-
-            for i, order in enumerate(orders):
-                if order.order_id == order_id:
-                    found = True
-                    order_index = i
-                    break
-
-            if not found:
+            # First, check if the order exists
+            order = self.storage.get_order(order_id)
+            if not order:
                 print(f"Error: Order with ID '{order_id}' not found.")
-                return
+                return False
 
             # Get confirmation unless --force is used
             if not args.force:
                 confirmation = input(f"Are you sure you want to delete order #{order_id}? (y/n): ")
                 if confirmation.lower() not in ["y", "yes"]:
                     print("Deletion cancelled.")
-                    return
+                    return False
 
-            # Delete the order from the list
-            deleted_order = orders.pop(order_index)
+            # Delete the order using storage
+            success = self.storage.delete_order(order_id)
 
-            # Save the updated order list back to the file
-            self.storage.save_orders_batch(orders)
-            print(f"Order #{order_id} successfully deleted.")
+            if success:
+                print(f"Order #{order_id} successfully deleted.")
+                return True
+            else:
+                print(f"Error: Failed to delete order #{order_id}.")
+                return False
 
-        except json.JSONDecodeError:
-            print("Error: Unable to parse order data. The storage file may be corrupted.")
-        except PermissionError:
-            print("Error: Permission denied when accessing the storage file.")
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
+            return False
