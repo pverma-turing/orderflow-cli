@@ -69,6 +69,26 @@ class DeleteCommand(Command):
         # Use regex to strictly check the format
         return bool(re.match(self.DATETIME_PATTERN, datetime_str))
 
+    def _is_valid_order(self, order):
+        """
+        Check if an order is valid for deletion (has required fields).
+
+        Args:
+            order: The order object to validate
+
+        Returns:
+            bool: True if the order is valid, False otherwise
+        """
+        # Check for essential fields
+        if not hasattr(order, 'order_id') or not order.order_id:
+            return False
+
+        # For tag-based deletion, ensure tags exist (other modes don't need this check)
+        if hasattr(order, 'tags') and order.tags is None:
+            return False
+
+        return True
+
     def _format_dishes(self, dishes):
         """Format dish list for display."""
         if not dishes:
@@ -119,12 +139,16 @@ class DeleteCommand(Command):
         rows = []
 
         for order in orders[:10]:  # Limit to 10 orders in the preview
+            # Skip invalid orders in the summary
+            if not self._is_valid_order(order):
+                continue
+
             rows.append([
                 order.order_id,
-                order.customer_name,
-                order.order_time,
-                order.status,
-                f"${order.order_total:.2f}"
+                order.customer_name if hasattr(order, 'customer_name') else 'N/A',
+                order.order_time if hasattr(order, 'order_time') else 'N/A',
+                order.status if hasattr(order, 'status') else 'N/A',
+                f"${order.order_total:.2f}" if hasattr(order, 'order_total') else 'N/A'
             ])
 
         # Add a summary row if there are more orders
@@ -231,43 +255,74 @@ class DeleteCommand(Command):
                 print(f"No orders found with tag '{tag}'.")
                 return False
 
-            order_count = len(matching_orders)
+            # Count all orders and valid orders
+            total_matched = len(matching_orders)
+            valid_orders = [order for order in matching_orders if self._is_valid_order(order)]
+            valid_count = len(valid_orders)
+            invalid_count = total_matched - valid_count
+
+            # Early warning if there are invalid orders
+            if invalid_count > 0:
+                print(f"Warning: Found {invalid_count} malformed order(s) with missing or invalid fields.")
+                print(f"These orders will be skipped during the deletion process.")
+
+            # If no valid orders, exit early
+            if valid_count == 0:
+                print(f"No valid orders to delete with tag '{tag}'.")
+                return False
 
             # Display a summary of the orders to be deleted
             if not force:
                 # Add dry-run indicator to the title if applicable
                 title_prefix = "Dry Run - " if dry_run else ""
-                print(f"\n{title_prefix}Found {order_count} order(s) with tag '{tag}':")
-                print(self._preview_orders_summary(matching_orders))
+                print(f"\n{title_prefix}Found {valid_count} valid order(s) with tag '{tag}':")
+                print(self._preview_orders_summary(valid_orders))
 
                 # Request confirmation
                 action_verb = "simulate deleting" if dry_run else "delete"
-                confirmation = input(f"\nAre you sure you want to {action_verb} {order_count} order(s)? (y/n): ")
+                confirmation = input(f"\nAre you sure you want to {action_verb} {valid_count} order(s)? (y/n): ")
                 if confirmation.lower() not in ["y", "yes"]:
                     print("Operation cancelled.")
                     return False
 
             # Handle dry run mode
             if dry_run:
-                print(f"Dry run: {order_count} order(s) would have been deleted.")
+                if invalid_count > 0:
+                    print(
+                        f"Dry run: {valid_count} order(s) would have been deleted, {invalid_count} order(s) would have been skipped.")
+                else:
+                    print(f"Dry run: {valid_count} order(s) would have been deleted.")
                 return True
 
             # Perform actual deletion
             deleted_count = 0
+            skipped_count = 0
             for order in matching_orders:
+                # Skip invalid orders with a warning
+                if not self._is_valid_order(order):
+                    print(f"Warning: Skipping malformed order with missing order_id or tags.")
+                    skipped_count += 1
+                    continue
+
+                # Try to delete the valid order
                 if storage.delete_order(order.order_id):
                     deleted_count += 1
+                else:
+                    print(f"Error: Failed to delete order with ID '{order.order_id}'.")
+                    skipped_count += 1
 
             # Report results
-            if deleted_count == order_count:
-                print(f"Successfully deleted {deleted_count} order(s) with tag '{tag}'.")
-                return True
-            elif deleted_count > 0:
-                print(f"Partially completed: Deleted {deleted_count} of {order_count} orders with tag '{tag}'.")
-                print("Some orders could not be deleted. Please try again or check the system logs.")
+            if deleted_count > 0:
+                if skipped_count > 0:
+                    print(f"Successfully deleted {deleted_count} order(s) with tag '{tag}'.")
+                    print(f"Skipped {skipped_count} order(s) due to errors or invalid data.")
+                else:
+                    print(f"Successfully deleted all {deleted_count} order(s) with tag '{tag}'.")
                 return True
             else:
                 print(f"Failed to delete any orders with tag '{tag}'.")
+                if skipped_count > 0:
+                    print(f"All {skipped_count} order(s) were skipped due to errors or invalid data.")
                 return False
 
         except Exception as e:
