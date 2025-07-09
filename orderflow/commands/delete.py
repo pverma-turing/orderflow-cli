@@ -37,10 +37,16 @@ class DeleteCommand(Command):
             help="Delete all orders with this tag"
         )
 
+        # Add operation mode flags
         parser.add_argument(
             "--force",
             action="store_true",
             help="Skip confirmation and force deletion"
+        )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Simulate deletion without actually removing any orders"
         )
 
     def _format_dishes(self, dishes):
@@ -50,7 +56,7 @@ class DeleteCommand(Command):
 
         dish_strings = []
         for dish in dishes[:3]:  # Display up to 3 dishes to keep the output clean
-            dish_strings.append(dish)
+            dish_strings.append(dish["name"])
 
         if len(dishes) > 3:
             dish_strings.append(f"...and {len(dishes) - 3} more")
@@ -61,7 +67,6 @@ class DeleteCommand(Command):
         """Create a formatted preview of the order in tabular format."""
         # Create a table with key order details
         headers = ["Order ID", "Customer", "Time", "Status", "Total", "Dishes"]
-
         # Format dishes for display
         formatted_dishes = self._format_dishes(order.dishes)
 
@@ -112,7 +117,7 @@ class DeleteCommand(Command):
         try:
             # Check if we're using tag-based deletion
             if args.tag:
-                return self._handle_tag_deletion(args.tag, args.force, self.storage)
+                return self._handle_tag_deletion(args.tag, args.force, args.dry_run, self.storage)
 
             # Regular single-order deletion
             # Check for valid identification method
@@ -154,19 +159,26 @@ class DeleteCommand(Command):
 
                 order = matching_orders[0]
                 order_id = order.order_id
-
             # Display order preview unless --force is used
             if not args.force:
-                print("\nOrder to Delete:")
+                # Add dry-run indicator to the preview title if applicable
+                title_prefix = "Dry Run - " if args.dry_run else ""
+                print(f"\n{title_prefix}Order to Delete:")
                 print(self._format_order_preview(order))
 
                 # Request confirmation
-                confirmation = input(f"\nAre you sure you want to delete this order? (y/n): ")
+                action_verb = "simulate deleting" if args.dry_run else "delete"
+                confirmation = input(f"\nAre you sure you want to {action_verb} this order? (y/n): ")
                 if confirmation.lower() not in ["y", "yes"]:
-                    print("Deletion cancelled.")
+                    print("Operation cancelled.")
                     return False
 
-            # Delete the order using storage
+            # Handle dry run mode
+            if args.dry_run:
+                print(f"Dry run: Order #{order_id} would have been deleted.")
+                return True
+
+            # Perform actual deletion
             success = self.storage.delete_order(order_id)
 
             if success:
@@ -180,7 +192,7 @@ class DeleteCommand(Command):
             print(f"An unexpected error occurred: {e}")
             return False
 
-    def _handle_tag_deletion(self, tag, force, storage):
+    def _handle_tag_deletion(self, tag, force, dry_run, storage):
         """Handle deletion of orders by tag."""
         try:
             # Find all orders with this tag
@@ -195,16 +207,24 @@ class DeleteCommand(Command):
 
             # Display a summary of the orders to be deleted
             if not force:
-                print(f"\nFound {order_count} order(s) with tag '{tag}':")
+                # Add dry-run indicator to the title if applicable
+                title_prefix = "Dry Run - " if dry_run else ""
+                print(f"\n{title_prefix}Found {order_count} order(s) with tag '{tag}':")
                 print(self._preview_orders_summary(matching_orders))
 
                 # Request confirmation
-                confirmation = input(f"\nAre you sure you want to delete {order_count} order(s)? (y/n): ")
+                action_verb = "simulate deleting" if dry_run else "delete"
+                confirmation = input(f"\nAre you sure you want to {action_verb} {order_count} order(s)? (y/n): ")
                 if confirmation.lower() not in ["y", "yes"]:
-                    print("Deletion cancelled.")
+                    print("Operation cancelled.")
                     return False
 
-            # Delete all matched orders
+            # Handle dry run mode
+            if dry_run:
+                print(f"Dry run: {order_count} order(s) would have been deleted.")
+                return True
+
+            # Perform actual deletion
             deleted_count = 0
             for order in matching_orders:
                 if storage.delete_order(order.order_id):
@@ -223,5 +243,5 @@ class DeleteCommand(Command):
                 return False
 
         except Exception as e:
-            print(f"An unexpected error occurred while deleting orders by tag: {e}")
+            print(f"An unexpected error occurred while processing orders by tag: {e}")
             return False
