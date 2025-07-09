@@ -141,6 +141,9 @@ class ViewCommand(Command):
         report_group.add_argument("--cancel-rate", action="store_true",
                             help="Show percentage of canceled orders within the filtered dataset")
 
+        report_group.add_argument("--multi-dish-ratio", action="store_true",
+                            help="Show the ratio of orders with multiple dishes vs. single dish orders")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -256,6 +259,9 @@ Examples:
 
             if args.cancel_rate:
                 self._display_cancel_rate(filtered_orders, "")
+
+            if args.multi_dish_ratio:
+                self._display_multi_dish_ratio(filtered_orders, "")
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -1212,3 +1218,57 @@ Examples:
         # Add additional details if specific filters are active
         if "status=" in filter_msg:
             print("\nNote: The '--status' filter may affect the cancellation rate calculation.")
+
+    def _display_multi_dish_ratio(self, orders, filter_description):
+        """Display statistics about single vs. multi-dish orders."""
+        total_orders = len(orders)
+
+        # Count orders by unique dish types
+        single_dish_orders = 0
+        multi_dish_orders = 0
+
+        for order in orders:
+            # Count unique dish types in the order
+            unique_dishes = set()
+
+            for dish_item in order.dishes:
+                try:
+                    # Parse dish format (Dish Name:Quantity)
+                    dish_name = dish_item['name']
+
+                    if dish_name:  # Only count non-empty dish names
+                        unique_dishes.add(dish_name)
+                except (IndexError, ValueError):
+                    # Skip malformed dish entries
+                    continue
+
+            # Categorize the order
+            if len(unique_dishes) <= 1:
+                single_dish_orders += 1
+            else:
+                multi_dish_orders += 1
+
+        # Calculate percentage with proper handling for empty order set
+        multi_dish_percentage = (multi_dish_orders / total_orders * 100) if total_orders > 0 else 0
+
+        # Create filter message
+        filter_msg = f" (filtered by: {filter_description})" if filter_description else ""
+
+        # Prepare table data
+        table_data = [
+            ["Total Orders", total_orders],
+            ["Single-Dish Orders", single_dish_orders],
+            ["Multi-Dish Orders", multi_dish_orders],
+            ["Multi-Dish Percentage", f"{multi_dish_percentage:.1f}%"]
+        ]
+
+        # Display the summary
+        print(f"\nOrder Composition Summary{filter_msg}")
+
+        if total_orders == 0:
+            print("No orders found matching the current filters.")
+            return
+
+        # Use the same tabulate formatting as other outputs
+        use_grid = self._should_use_grid_format()
+        print(tabulate(table_data, tablefmt="grid" if use_grid else "simple"))
