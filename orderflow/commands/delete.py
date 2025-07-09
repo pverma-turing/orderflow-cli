@@ -31,6 +31,11 @@ class DeleteCommand(Command):
             type=str,
             help="Time of the order (use with --customer-name)"
         )
+        id_group.add_argument(
+            "--tag",
+            type=str,
+            help="Delete all orders with this tag"
+        )
 
         parser.add_argument(
             "--force",
@@ -78,15 +83,44 @@ class DeleteCommand(Command):
 
         return table
 
+    def _preview_orders_summary(self, orders):
+        """Create a summary table of multiple orders."""
+        if not orders:
+            return "No orders found."
+
+        # Create a table with summary information
+        headers = ["Order ID", "Customer", "Time", "Status", "Total"]
+        rows = []
+
+        for order in orders[:10]:  # Limit to 10 orders in the preview
+            rows.append([
+                order.order_id,
+                order.customer_name,
+                order.order_time,
+                order.status,
+                f"${order.order_total:.2f}"
+            ])
+
+        # Add a summary row if there are more orders
+        if len(orders) > 10:
+            rows.append(["...", f"+ {len(orders) - 10} more orders", "", "", ""])
+
+        return tabulate(rows, headers=headers, tablefmt="grid")
+
     def execute(self, args):
         """Execute the delete operation."""
         try:
+            # Check if we're using tag-based deletion
+            if args.tag:
+                return self._handle_tag_deletion(args.tag, args.force, self.storage)
+
+            # Regular single-order deletion
             # Check for valid identification method
             using_id = args.order_id is not None
             using_customer_time = args.customer_name is not None and args.order_time is not None
 
             if not using_id and not using_customer_time:
-                print("Error: You must provide either --order-id OR both --customer-name and --order-time.")
+                print("Error: You must provide either --order-id OR both --customer-name and --order-time, OR --tag.")
                 return False
 
             # Check for ambiguous identification
@@ -115,19 +149,7 @@ class DeleteCommand(Command):
                         f"Error: Multiple orders found for customer '{args.customer_name}' at time '{args.order_time}'.")
                     print("Please use --order-id to specify which order to delete.")
                     print("\nMatching orders:")
-
-                    # Display matching orders in a tabular format
-                    headers = ["Order ID", "Customer", "Time", "Status", "Total"]
-                    rows = []
-                    for match in matching_orders:
-                        rows.append([
-                            match.order_id,
-                            match.customer_name,
-                            match.order_time,
-                            match.status,
-                            f"${match.order_total:.2f}"
-                        ])
-                    print(tabulate(rows, headers=headers, tablefmt="grid"))
+                    print(self._preview_orders_summary(matching_orders))
                     return False
 
                 order = matching_orders[0]
@@ -156,4 +178,50 @@ class DeleteCommand(Command):
 
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
+            return False
+
+    def _handle_tag_deletion(self, tag, force, storage):
+        """Handle deletion of orders by tag."""
+        try:
+            # Find all orders with this tag
+            matching_orders = storage.find_orders_by_tag(tag)
+
+            # Check if any orders match the tag
+            if not matching_orders:
+                print(f"No orders found with tag '{tag}'.")
+                return False
+
+            order_count = len(matching_orders)
+
+            # Display a summary of the orders to be deleted
+            if not force:
+                print(f"\nFound {order_count} order(s) with tag '{tag}':")
+                print(self._preview_orders_summary(matching_orders))
+
+                # Request confirmation
+                confirmation = input(f"\nAre you sure you want to delete {order_count} order(s)? (y/n): ")
+                if confirmation.lower() not in ["y", "yes"]:
+                    print("Deletion cancelled.")
+                    return False
+
+            # Delete all matched orders
+            deleted_count = 0
+            for order in matching_orders:
+                if storage.delete_order(order.order_id):
+                    deleted_count += 1
+
+            # Report results
+            if deleted_count == order_count:
+                print(f"Successfully deleted {deleted_count} order(s) with tag '{tag}'.")
+                return True
+            elif deleted_count > 0:
+                print(f"Partially completed: Deleted {deleted_count} of {order_count} orders with tag '{tag}'.")
+                print("Some orders could not be deleted. Please try again or check the system logs.")
+                return True
+            else:
+                print(f"Failed to delete any orders with tag '{tag}'.")
+                return False
+
+        except Exception as e:
+            print(f"An unexpected error occurred while deleting orders by tag: {e}")
             return False

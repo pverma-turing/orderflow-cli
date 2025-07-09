@@ -290,3 +290,33 @@ class JsonStorage(Storage):
             # Log the error if logging is set up
             # self.logger.error(f"Error finding orders by customer and time: {e}")
             return []
+
+    def find_orders_by_tag(self, tag):
+        """
+        Find all orders that have a specific tag.
+
+        Args:
+            tag (str): The tag to search for
+
+        Returns:
+            list: List of Order objects that have the specified tag
+        """
+        try:
+            # Load all orders
+            all_orders = self.get_orders()
+
+            # Filter orders by tag (case-insensitive)
+            matching_orders = []
+            for order in all_orders:
+                # Check if the order has tags
+                if hasattr(order, 'tags') and order.tags:
+                    # Compare tag (case-insensitive)
+                    if any(t.lower() == tag.lower() for t in order.tags):
+                        matching_orders.append(order)
+
+            return matching_orders
+
+        except Exception as e:
+            # Log the error if logging is set up
+            # self.logger.error(f"Error finding orders by tag: {e}")
+            return []
