@@ -255,3 +255,38 @@ class JsonStorage(Storage):
             # Log the error if logging is set up
             # self.logger.error(f"Error deleting order {order_id}: {e}")
             return False
+
+    def find_orders_by_customer_and_time(self, customer_name, order_time):
+        """
+        Find orders by customer name and order time.
+
+        Args:
+            customer_name (str): The name of the customer
+            order_time (str): The time of the order
+
+        Returns:
+            list: List of Order objects that match both criteria
+        """
+        try:
+            # Load all orders
+            all_orders = self.get_orders()
+
+            # Filter orders by customer name and order time
+            matching_orders = []
+            for order in all_orders:
+                # Compare customer name (case-insensitive)
+                name_matches = order.customer_name.lower() == customer_name.lower()
+
+                # Compare order time, allowing for flexible matching
+                # This handles different time formats and partial matches
+                time_matches = order_time in order.order_time
+
+                if name_matches and time_matches:
+                    matching_orders.append(order)
+
+            return matching_orders
+
+        except Exception as e:
+            # Log the error if logging is set up
+            # self.logger.error(f"Error finding orders by customer and time: {e}")
+            return []
