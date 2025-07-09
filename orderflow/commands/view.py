@@ -128,6 +128,9 @@ class ViewCommand(Command):
         report_group.add_argument("--customer-summary", action="store_true",
                             help="Show a full alphabetical list of customer order statistics")
 
+        report_group.add_argument("--avg-dish-value", action="store_true",
+                            help="Show average revenue per unit sold for each dish across filtered orders")
+
         # New day summary flag
         report_group.add_argument("--day-summary", action="store_true",
                             help="Show revenue trends by day for the filtered orders")
@@ -238,6 +241,9 @@ Examples:
 
             if args.day_summary:
                 self._display_day_summary(filtered_orders, "")
+
+            if args.avg_dish_value:
+                self._display_avg_dish_value(filtered_orders, "")
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -983,3 +989,80 @@ Examples:
 
         print(f"\nSummary: {total_days} days, {total_orders} orders, ${total_revenue:.2f} total revenue")
         print(f"Overall average order value: ${overall_avg:.2f}")
+
+    def _display_avg_dish_value(self, orders, filter_description):
+        """Display average revenue per unit for each dish across filtered orders."""
+        # Aggregate dish data
+        dish_data = {}
+
+        # First pass - collect dish data
+        for order in orders:
+            for dish_item in order.dishes:
+                try:
+                    # Parse dish format (Dish Name:Quantity)
+                    dish_name = dish_item['name']
+                    quantity = dish_item['quantity']
+
+                    if not dish_name:
+                        continue
+
+                    if dish_name not in dish_data:
+                        dish_data[dish_name] = {"quantity": 0, "revenue": 0.0}
+
+                    dish_data[dish_name]["quantity"] += quantity
+
+                    # Estimate revenue based on proportion of the total order
+                    total_qty_in_order = sum(int(d.split(":")[1].strip()) if ":" in d else 1 for d in order.dishes)
+                    dish_proportion = quantity / total_qty_in_order if total_qty_in_order > 0 else 0
+                    dish_revenue = order.order_total * dish_proportion
+
+                    dish_data[dish_name]["revenue"] += dish_revenue
+
+                except (IndexError, ValueError, ZeroDivisionError):
+                    # Skip malformed dish entries
+                    continue
+
+        # Create filter message
+        filter_msg = f" (filtered by: {filter_description})" if filter_description else ""
+
+        # Display the table header
+        print(f"\nAverage Dish Value Report{filter_msg}")
+
+        if not dish_data:
+            print("No dish data available for the current filters.")
+            return
+
+        # Calculate average value per unit for each dish
+        for dish_name, data in dish_data.items():
+            quantity = data["quantity"]
+            revenue = data["revenue"]
+            data["avg_value"] = revenue / quantity if quantity > 0 else 0
+
+        # Prepare the table data sorted by average value (descending)
+        table_data = []
+        for dish_name, data in sorted(dish_data.items(), key=lambda x: x[1]["avg_value"], reverse=True):
+            quantity = data["quantity"]
+            revenue = data["revenue"]
+            avg_value = data["avg_value"]
+
+            table_data.append([
+                dish_name,
+                quantity,
+                f"${revenue:.2f}",
+                f"${avg_value:.2f}"
+            ])
+
+        headers = ["Dish Name", "Quantity Sold", "Total Revenue", "Avg Revenue/Unit"]
+
+        # Use grid format for the table
+        print(tabulate(table_data, headers=headers, tablefmt="grid"))
+
+        # Add a summary footer
+        total_dishes = len(dish_data)
+        total_quantity = sum(data["quantity"] for data in dish_data.values())
+        total_revenue = sum(data["revenue"] for data in dish_data.values())
+        overall_avg_value = total_revenue / total_quantity if total_quantity > 0 else 0
+
+        print(
+            f"\nSummary: {total_dishes} unique dishes, {total_quantity} units sold, ${total_revenue:.2f} total revenue")
+        print(f"Overall average revenue per unit: ${overall_avg_value:.2f}")
