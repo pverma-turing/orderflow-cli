@@ -135,6 +135,9 @@ class ViewCommand(Command):
         report_group.add_argument("--day-summary", action="store_true",
                             help="Show revenue trends by day for the filtered orders")
 
+        report_group.add_argument("--hourly-distribution", action="store_true",
+                            help="Show order distribution by hour of day (0-23)")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -244,6 +247,9 @@ Examples:
 
             if args.avg_dish_value:
                 self._display_avg_dish_value(filtered_orders, "")
+
+            if args.hourly_distribution:
+                self._display_hourly_distribution(filtered_orders, "")
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -1066,3 +1072,95 @@ Examples:
         print(
             f"\nSummary: {total_dishes} unique dishes, {total_quantity} units sold, ${total_revenue:.2f} total revenue")
         print(f"Overall average revenue per unit: ${overall_avg_value:.2f}")
+
+    def _display_hourly_distribution(self, orders, filter_description):
+        """Display order distribution by hour of day."""
+        from datetime import datetime
+
+        # Dictionary to store data aggregated by hour
+        hourly_data = {}
+
+        # First pass - collect data by hour
+        for order in orders:
+            # Skip orders without a valid order_time
+            if not hasattr(order, 'order_time') or not order.order_time:
+                continue
+
+            # Convert order_time to datetime if it's a string
+            order_time = order.order_time
+            if isinstance(order_time, str):
+                try:
+                    # Try to parse the datetime string
+                    if 'T' in order_time:
+                        # ISO format (2023-01-01T12:34:56)
+                        order_time = datetime.fromisoformat(order_time.replace('Z', '+00:00'))
+                    else:
+                        # Space-delimited format (2023-01-01 12:34:56)
+                        order_time = datetime.strptime(order_time, '%Y-%m-%d %H:%M:%S')
+                except (ValueError, TypeError):
+                    # Skip orders with unparseable timestamps
+                    continue
+
+            # Extract hour component (0-23)
+            hour = order_time.hour if hasattr(order_time, 'hour') else None
+            if hour is None:
+                continue
+
+            # Initialize hour data if not already present
+            if hour not in hourly_data:
+                hourly_data[hour] = {
+                    "order_count": 0,
+                    "total_revenue": 0.0
+                }
+
+            # Update hourly data
+            hourly_data[hour]["order_count"] += 1
+            hourly_data[hour]["total_revenue"] += order.order_total
+
+        # Create filter message
+        filter_msg = f" (filtered by: {filter_description})" if filter_description else ""
+
+        # Display the table header
+        print(f"\nHourly Order Distribution{filter_msg}")
+
+        if not hourly_data:
+            print("No order data available for the current filters.")
+            return
+
+        # Prepare the table data sorted by hour (ascending)
+        table_data = []
+        for hour in sorted(hourly_data.keys()):
+            data = hourly_data[hour]
+            order_count = data["order_count"]
+            total_revenue = data["total_revenue"]
+            avg_order_value = total_revenue / order_count if order_count > 0 else 0
+
+            # Format hour for display (e.g., "07:00 - 07:59" for hour 7)
+            hour_display = f"{hour:02d}:00 - {hour:02d}:59"
+
+            table_data.append([
+                hour_display,
+                order_count,
+                f"${total_revenue:.2f}",
+                f"${avg_order_value:.2f}"
+            ])
+
+        headers = ["Hour of Day", "Order Count", "Total Revenue", "Avg Order Value"]
+
+        # Use grid format for the table
+        print(tabulate(table_data, headers=headers, tablefmt="grid"))
+
+        # Add a summary footer
+        total_hours = len(hourly_data)
+        total_orders = sum(data["order_count"] for data in hourly_data.values())
+        total_revenue = sum(data["total_revenue"] for data in hourly_data.values())
+
+        peak_hour = max(hourly_data.items(), key=lambda x: x[1]["order_count"])[0]
+        peak_hour_display = f"{peak_hour:02d}:00 - {peak_hour:02d}:59"
+        peak_revenue_hour = max(hourly_data.items(), key=lambda x: x[1]["total_revenue"])[0]
+        peak_revenue_hour_display = f"{peak_revenue_hour:02d}:00 - {peak_revenue_hour:02d}:59"
+
+        print(f"\nSummary: {total_orders} orders across {total_hours} active hours, ${total_revenue:.2f} total revenue")
+        print(f"Peak order hour: {peak_hour_display} ({hourly_data[peak_hour]['order_count']} orders)")
+        print(
+            f"Peak revenue hour: {peak_revenue_hour_display} (${hourly_data[peak_revenue_hour]['total_revenue']:.2f})")
