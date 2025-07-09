@@ -103,6 +103,38 @@ class DeleteCommand(Command):
 
         return "\n".join(dish_strings)
 
+    def _format_order_summary(self, order):
+        """
+        Create a concise summary of an order for deletion feedback.
+
+        Args:
+            order: The order object
+
+        Returns:
+            str: A formatted summary string
+        """
+        # Safe getattr to handle potentially missing attributes
+        order_id = getattr(order, 'order_id', 'Unknown ID')
+        customer_name = getattr(order, 'customer_name', 'Unknown customer')
+        order_time = getattr(order, 'order_time', 'Unknown time')
+        status = getattr(order, 'status', 'Unknown status')
+
+        # Format total with currency symbol
+        if hasattr(order, 'order_total'):
+            total = f"₹{order.order_total:.2f}"
+        else:
+            total = "₹0.00"
+
+        # Count dishes
+        dish_count = 0
+        if hasattr(order, 'dishes') and order.dishes:
+            dish_count = len(order.dishes)
+
+        # Build the summary string
+        summary = f"[{order_id}] {customer_name} – {total} – {status} – {dish_count} items at {order_time}"
+
+        return summary
+
     def _format_order_preview(self, order):
         """Create a formatted preview of the order in tabular format."""
         # Create a table with key order details
@@ -112,7 +144,7 @@ class DeleteCommand(Command):
         formatted_dishes = self._format_dishes(order.dishes)
 
         # Format monetary value
-        formatted_total = f"${order.order_total:.2f}"
+        formatted_total = f"₹{order.order_total:.2f}"
 
         # Create a single row with the order details
         row = [
@@ -148,7 +180,7 @@ class DeleteCommand(Command):
                 order.customer_name if hasattr(order, 'customer_name') else 'N/A',
                 order.order_time if hasattr(order, 'order_time') else 'N/A',
                 order.status if hasattr(order, 'status') else 'N/A',
-                f"${order.order_total:.2f}" if hasattr(order, 'order_total') else 'N/A'
+                f"₹{order.order_total:.2f}" if hasattr(order, 'order_total') else 'N/A'
             ])
 
         # Add a summary row if there are more orders
@@ -157,12 +189,12 @@ class DeleteCommand(Command):
 
         return tabulate(rows, headers=headers, tablefmt="grid")
 
-    def execute(self, args):
+    def execute(self, args, storage):
         """Execute the delete operation."""
         try:
             # Check if we're using tag-based deletion
             if args.tag:
-                return self._handle_tag_deletion(args.tag, args.force, args.dry_run, self.storage)
+                return self._handle_tag_deletion(args.tag, args.force, args.dry_run, storage)
 
             # Early validation of order-time format if provided
             if args.order_time is not None:
@@ -186,13 +218,12 @@ class DeleteCommand(Command):
             # Find the order
             order = None
             if using_id:
-                order = self.storage.get_order(args.order_id)
+                order = storage.get_order(args.order_id)
                 if not order:
                     print(f"Error: Order with ID '{args.order_id}' not found.")
                     return False
-                order_id = args.order_id
             else:  # using customer name and time
-                matching_orders = self.storage.find_orders_by_customer_and_time(
+                matching_orders = storage.find_orders_by_customer_and_time(
                     args.customer_name, args.order_time
                 )
 
@@ -209,7 +240,6 @@ class DeleteCommand(Command):
                     return False
 
                 order = matching_orders[0]
-                order_id = order.order_id
 
             # Display order preview unless --force is used
             if not args.force:
@@ -227,14 +257,19 @@ class DeleteCommand(Command):
 
             # Handle dry run mode
             if args.dry_run:
-                print(f"Dry run: Order #{order_id} would have been deleted.")
+                print(f"Dry run: Order would have been deleted:")
+                print(f"  Deleted order: {self._format_order_summary(order)}")
                 return True
 
+            # Store order_id before deletion (to use in success message)
+            order_id = order.order_id
+            order_summary = self._format_order_summary(order)
+
             # Perform actual deletion
-            success = self.storage.delete_order(order_id)
+            success = storage.delete_order(order_id)
 
             if success:
-                print(f"Order #{order_id} successfully deleted.")
+                print(f"Deleted order: {order_summary}")
                 return True
             else:
                 print(f"Error: Failed to delete order #{order_id}.")
@@ -287,42 +322,56 @@ class DeleteCommand(Command):
 
             # Handle dry run mode
             if dry_run:
+                print(f"\nDry run: The following orders would have been deleted:")
+                for order in matching_orders:
+                    if self._is_valid_order(order):
+                        print(f"  Deleted order: {self._format_order_summary(order)}")
+                    else:
+                        print(f"  Skipped malformed order: {getattr(order, 'order_id', 'Unknown ID')}")
+
                 if invalid_count > 0:
                     print(
-                        f"Dry run: {valid_count} order(s) would have been deleted, {invalid_count} order(s) would have been skipped.")
+                        f"\n{valid_count} order(s) would have been deleted, {invalid_count} order(s) would have been skipped.")
                 else:
-                    print(f"Dry run: {valid_count} order(s) would have been deleted.")
+                    print(f"\n{valid_count} order(s) would have been deleted.")
                 return True
 
             # Perform actual deletion
             deleted_count = 0
             skipped_count = 0
+            print("\nDeleting orders...")
+
             for order in matching_orders:
                 # Skip invalid orders with a warning
                 if not self._is_valid_order(order):
-                    print(f"Warning: Skipping malformed order with missing order_id or tags.")
+                    print(f"  Skipped malformed order: {getattr(order, 'order_id', 'Unknown ID')}")
                     skipped_count += 1
                     continue
 
+                # Format the order summary before deletion
+                order_summary = self._format_order_summary(order)
+
                 # Try to delete the valid order
                 if storage.delete_order(order.order_id):
+                    print(f"  Deleted order: {order_summary}")
                     deleted_count += 1
                 else:
-                    print(f"Error: Failed to delete order with ID '{order.order_id}'.")
+                    print(f"  Failed to delete: [{order.order_id}]")
                     skipped_count += 1
 
             # Report results
+            print("\nSummary:")
             if deleted_count > 0:
                 if skipped_count > 0:
-                    print(f"Successfully deleted {deleted_count} order(s) with tag '{tag}'.")
-                    print(f"Skipped {skipped_count} order(s) due to errors or invalid data.")
+                    print(f"✓ Successfully deleted {deleted_count} order(s) with tag '{tag}'.")
+                    print(f"⚠ Skipped {skipped_count} order(s) due to errors or invalid data.")
                 else:
-                    print(f"Successfully deleted all {deleted_count} order(s) with tag '{tag}'.")
+                    print(f"✓ Successfully deleted all {deleted_count} order(s) with tag '{tag}'.")
                 return True
             else:
-                print(f"Failed to delete any orders with tag '{tag}'.")
+                print(f"✘ Failed to delete any orders with tag '{tag}'.")
                 if skipped_count > 0:
-                    print(f"All {skipped_count} order(s) were skipped due to errors or invalid data.")
+                    print(f"⚠ All {skipped_count} order(s) were skipped due to errors or invalid data.")
                 return False
 
         except Exception as e:
