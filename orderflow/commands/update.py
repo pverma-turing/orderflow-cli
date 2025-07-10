@@ -23,6 +23,8 @@ class UpdateCommand(Command):
                             help='Tag to remove (can specify multiple times)')
         parser.add_argument('--note', help='Replace the order-level note')
         parser.add_argument('--order-time', help='Update order time (ISO 8601 format, e.g., 2024-07-10T15:30:00)')
+        parser.add_argument('--dishes',
+                            help='Replace dishes list with comma-separated dish names (e.g., "Pizza,Salad,Coke")')
 
         # Dry-run flag
         parser.add_argument('--dry-run', action='store_true',
@@ -39,6 +41,34 @@ class UpdateCommand(Command):
             self.error(
                 f"Invalid datetime format: '{datetime_str}'. Expected ISO 8601 format (e.g., 2024-07-10T15:30:00)")
             return None
+
+    def _parse_dishes_list(self, dishes_str):
+        """
+        Parse a comma-separated string of dish names.
+        Returns a list of valid dish names if successful, None otherwise.
+        """
+        if not dishes_str or not dishes_str.strip():
+            self.error("Dishes list cannot be empty")
+            return None
+
+        # Split by comma and strip whitespace
+        dishes = [dish.strip() for dish in dishes_str.split(',')]
+
+        # Filter out empty dishes
+        dishes = [dish for dish in dishes if dish]
+
+        # Validate the list is not empty after filtering
+        if not dishes:
+            self.error("Dishes list cannot be empty or contain only whitespace")
+            return None
+
+        # Validate each dish is a string (already guaranteed by the split operation)
+        for dish in dishes:
+            if not isinstance(dish, str):
+                self.error(f"Invalid dish name: {dish}. All dishes must be strings")
+                return None
+
+        return dishes
 
     def _get_order_and_validate(self, order_id):
         """
@@ -107,6 +137,14 @@ class UpdateCommand(Command):
                     current_display = current_time.isoformat() if current_time else "None"
                     changes.append(f"Order time: {current_display} → {new_time.isoformat()}")
 
+        # Check dishes change
+        if args.dishes is not None:
+            new_dishes = self._parse_dishes_list(args.dishes)
+            if new_dishes is not None:
+                current_dishes = [dish['name'] for dish in order.dishes]
+                if set(current_dishes) != set(new_dishes):
+                    changes.append(f"Dishes: {current_dishes} → {new_dishes}")
+
         return changes
 
     def _apply_updates(self, order, args):
@@ -137,13 +175,19 @@ class UpdateCommand(Command):
 
         # Update note if provided
         if args.note is not None:
-            order.note = args.note
+            order.notes = args.note
 
         # Update order time if provided and valid
         if args.order_time is not None:
             new_time = self._parse_iso_datetime(args.order_time)
             if new_time is not None:
-                order.order_time = new_time
+                order.order_time = new_time.strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+        # Update dishes if provided and valid
+        if args.dishes is not None:
+            new_dishes = self._parse_dishes_list(args.dishes)
+            if new_dishes is not None:
+                order.dishes = new_dishes
 
     def _print_update_summary(self, changes, dry_run=False):
         """
@@ -173,16 +217,20 @@ class UpdateCommand(Command):
             len(args.add_tag) > 0,
             len(args.remove_tag) > 0,
             args.note is not None,
-            args.order_time is not None
+            args.order_time is not None,
+            args.dishes is not None
         ]
 
         if not any(update_fields):
             self.error("At least one field must be provided to update")
             return 1
 
-        # If order time is provided, validate it early
+        # Validate input formats before retrieving the order
         if args.order_time is not None and self._parse_iso_datetime(args.order_time) is None:
             return 1  # Error already printed by _parse_iso_datetime
+
+        if args.dishes is not None and self._parse_dishes_list(args.dishes) is None:
+            return 1  # Error already printed by _parse_dishes_list
 
         # Retrieve and validate the order
         order = self._get_order_and_validate(args.id)
