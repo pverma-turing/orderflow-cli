@@ -3,6 +3,7 @@ from orderflow.commands.add import AddCommand
 from orderflow.commands.delete import DeleteCommand
 from orderflow.commands.export import ExportCommand
 from orderflow.commands.status_history import StatusHistoryCommand
+from orderflow.commands.update import UpdateCommand
 from orderflow.commands.view import ViewCommand
 from orderflow.commands.update_status import UpdateStatusCommand
 from orderflow.commands.check_duplicates import CheckDuplicatesCommand
@@ -101,5 +102,16 @@ For detailed help on a specific command, use:
     delete_command = DeleteCommand(storage)
     delete_command.add_arguments(delete_parser)
     delete_parser.set_defaults(func=delete_command.execute)
+
+    # Update command
+    update_parser = subparsers.add_parser(
+        'update',
+        help='Update order',
+        description='Update order with powerful filtering',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    update_command = UpdateCommand(storage)
+    update_command.add_arguments(update_parser)
+    update_parser.set_defaults(func=update_command.execute)
 
     return parser
