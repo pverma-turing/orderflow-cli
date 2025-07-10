@@ -24,7 +24,8 @@ class UpdateCommand(Command):
         parser.add_argument('--note', help='Replace the order-level note')
         parser.add_argument('--order-time', help='Update order time (ISO 8601 format, e.g., 2024-07-10T15:30:00)')
         parser.add_argument('--dishes',
-                            help='Replace dishes list with comma-separated dish names (e.g., "Pizza,Salad,Coke")')
+                            help='Replace dishes list with comma-separated dish names and optional quantities '
+                                 '(e.g., "Pizza:2,Salad,Coke:1" where default quantity is 1)')
 
         # Dry-run flag
         parser.add_argument('--dry-run', action='store_true',
@@ -44,29 +45,60 @@ class UpdateCommand(Command):
 
     def _parse_dishes_list(self, dishes_str):
         """
-        Parse a comma-separated string of dish names.
-        Returns a list of valid dish names if successful, None otherwise.
+        Parse a comma-separated string of dish items with optional quantities.
+        Format: "Pizza:2,Salad,Coke:1" where default quantity is 1 if omitted.
+        Returns a list of dish dictionaries with name and quantity if successful, None otherwise.
         """
         if not dishes_str or not dishes_str.strip():
             self.error("Dishes list cannot be empty")
             return None
 
-        # Split by comma and strip whitespace
-        dishes = [dish.strip() for dish in dishes_str.split(',')]
+        # Split by comma
+        dish_items = [item.strip() for item in dishes_str.split(',')]
 
-        # Filter out empty dishes
-        dishes = [dish for dish in dishes if dish]
+        # Filter out empty items
+        dish_items = [item for item in dish_items if item]
 
         # Validate the list is not empty after filtering
-        if not dishes:
+        if not dish_items:
             self.error("Dishes list cannot be empty or contain only whitespace")
             return None
 
-        # Validate each dish is a string (already guaranteed by the split operation)
-        for dish in dishes:
-            if not isinstance(dish, str):
-                self.error(f"Invalid dish name: {dish}. All dishes must be strings")
-                return None
+        # Parse each dish item and validate
+        dishes = []
+        for item in dish_items:
+            # Check if quantity is specified
+            if ':' in item:
+                name, quantity_str = item.split(':', 1)
+                name = name.strip()
+                quantity_str = quantity_str.strip()
+
+                # Validate dish name
+                if not name:
+                    self.error(f"Dish name cannot be empty in '{item}'")
+                    return None
+
+                # Validate quantity
+                try:
+                    quantity = int(quantity_str)
+                    if quantity <= 0:
+                        self.error(f"Quantity must be a positive integer in '{item}'")
+                        return None
+                except ValueError:
+                    self.error(f"Invalid quantity format in '{item}'. Expected a positive integer")
+                    return None
+            else:
+                # No quantity specified, default to 1
+                name = item.strip()
+                quantity = 1
+
+                # Validate dish name
+                if not name:
+                    self.error(f"Dish name cannot be empty")
+                    return None
+
+            # Add validated dish to the list
+            dishes.append({'name': name, 'quantity': quantity})
 
         return dishes
 
@@ -141,9 +173,20 @@ class UpdateCommand(Command):
         if args.dishes is not None:
             new_dishes = self._parse_dishes_list(args.dishes)
             if new_dishes is not None:
-                current_dishes = [dish['name'] for dish in order.dishes]
-                if set(current_dishes) != set(new_dishes):
-                    changes.append(f"Dishes: {current_dishes} → {new_dishes}")
+                # Get current dishes, ensuring it's in the expected format
+                current_dishes = getattr(order, 'dishes', [])
+
+                # Convert simple string dishes to dict format for comparison if needed
+                formatted_current_dishes = []
+                for dish in current_dishes:
+                    if isinstance(dish, dict) and 'name' in dish and 'quantity' in dish:
+                        formatted_current_dishes.append(dish)
+                    elif isinstance(dish, str):
+                        formatted_current_dishes.append({'name': dish, 'quantity': 1})
+
+                # Compare the dishes (need to use string representation since dicts aren't directly comparable)
+                if str(formatted_current_dishes) != str(new_dishes):
+                    changes.append(f"Dishes: {formatted_current_dishes} → {new_dishes}")
 
         return changes
 
