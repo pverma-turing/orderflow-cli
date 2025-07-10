@@ -25,68 +25,113 @@ class UpdateCommand(Command):
         parser.add_argument('--dry-run', action='store_true',
                             help='Preview changes without saving')
 
-    def _compute_updates(self, order, args):
+    def _get_order_and_validate(self, order_id):
         """
-        Compute updates to be applied based on the provided arguments.
-        Returns a tuple of (updated_order, changes_summary).
+        Retrieve the order and validate it exists.
+        Returns the order if found, None otherwise.
         """
-        # Create a copy of the order to avoid modifying the original during dry-run
-        updated_order = order.to_dict()  # Shallow copy is sufficient for our needs
+        try:
+            order = self.storage.get_order(order_id)
+            return order
+        except KeyError:
+            self.error(f"Order with ID {order_id} not found")
+            return None
 
-        # Prepare a list to track changes for reporting
+    def _compute_field_differences(self, order, args):
+        """
+        Compute field differences based on the provided arguments.
+        Returns a list of human-readable change descriptions.
+        """
         changes = []
 
-        # Update customer name if provided and valid
+        # Check customer name change
         if args.customer_name is not None:
-            if args.customer_name.strip():  # Check if non-empty after stripping whitespace
-                if args.customer_name != order.get('customer_name', ''):
-                    changes.append(f"Customer name: '{order.get('customer_name', '')}' → '{args.customer_name}'")
-                    updated_order['customer_name'] = args.customer_name
+            if args.customer_name.strip():  # Non-empty after stripping
+                if args.customer_name != order.customer_name:
+                    changes.append(f"Customer name: '{order.customer_name}' → '{args.customer_name}'")
             else:
                 self.warn("Customer name cannot be blank - skipping this update")
 
-        # Update total if provided
+        # Check total change
         if args.total is not None:
             if args.total >= 0:  # Ensure total is non-negative
-                if args.total != order.get('order_total', 0):
-                    changes.append(f"Order total: {order.get('order_total', 0)} → {args.total}")
-                    updated_order['order_total'] = args.total
+                if args.total != order.order_total:
+                    changes.append(f"Order total: {order.order_total} → {args.total}")
             else:
                 self.warn("Order total cannot be negative - skipping this update")
 
-        # Handle tag updates
+        # Calculate tag changes
         tags_to_add = []
-        tags_to_remove = []
-
-        # Ensure tags field exists
-        if 'tags' not in updated_order:
-            updated_order['tags'] = []
-
-        # Identify tags to add (ensuring uniqueness)
         for tag in args.add_tag:
-            if tag and tag not in updated_order['tags']:
+            if tag and tag not in order.tags:
                 tags_to_add.append(tag)
-                updated_order['tags'].append(tag)
 
-        # Identify tags to remove
+        tags_to_remove = []
         for tag in args.remove_tag:
-            if tag and tag in updated_order['tags']:
+            if tag and tag in order.tags:
                 tags_to_remove.append(tag)
-                updated_order['tags'].remove(tag)
 
-        # Add tag changes to the summary
+        # Add tag changes to summary
         if tags_to_add:
             changes.append(f"Add tags: {', '.join(tags_to_add)}")
         if tags_to_remove:
             changes.append(f"Remove tags: {', '.join(tags_to_remove)}")
 
+        # Check note change
+        if args.note is not None:
+            if getattr(order, 'notes', '') != args.note:
+                changes.append("Note updated")
+
+        return changes
+
+    def _apply_updates(self, order, args):
+        """
+        Apply all updates to the order object.
+        """
+        # Update customer name if valid
+        if args.customer_name is not None and args.customer_name.strip():
+            order.customer_name = args.customer_name
+
+        # Update total if valid
+        if args.total is not None and args.total >= 0:
+            order.order_total = args.total
+
+        # Ensure tags attribute exists
+        if not hasattr(order, 'tags'):
+            order.tags = []
+
+        # Add new tags (ensuring uniqueness)
+        for tag in args.add_tag:
+            if tag and tag not in order.tags:
+                order.tags.append(tag)
+
+        # Remove specified tags
+        for tag in args.remove_tag:
+            if tag and tag in order.tags:
+                order.tags.remove(tag)
+
         # Update note if provided
         if args.note is not None:
-            if args.note != order.get('note', ''):
-                changes.append("Note updated")
-                updated_order['note'] = args.note
+            order.notes = args.note
 
-        return updated_order, changes
+    def _print_update_summary(self, changes, dry_run=False):
+        """
+        Print a summary of the updates applied or to be applied.
+        """
+        if not changes:
+            if dry_run:
+                print("Dry run: No changes would be made")
+            else:
+                print("No changes were made")
+            return
+
+        if dry_run:
+            print("Dry run: Changes that would be applied:")
+        else:
+            print("Applied changes:")
+
+        for change in changes:
+            print(f"- {change}")
 
     def execute(self, args):
         """Execute the update command."""
@@ -103,37 +148,27 @@ class UpdateCommand(Command):
             self.error("At least one field must be provided to update")
             return 1
 
-        # Retrieve the order to be updated
-        order_id = args.id
-        try:
-            order = self.storage.get_order(order_id)
-        except KeyError:
-            self.error(f"Order with ID {order_id} not found")
+        # Retrieve and validate the order
+        order = self._get_order_and_validate(args.id)
+        if order is None:
             return 1
 
-        # Compute the updates to be applied
-        updated_order, changes = self._compute_updates(order, args)
+        # Compute field differences
+        changes = self._compute_field_differences(order, args)
 
         # Handle dry-run mode
         if args.dry_run:
-            if changes:
-                print(f"Dry run: Changes that would be applied to order {order_id}:")
-                for change in changes:
-                    print(f"- {change}")
-            else:
-                print(f"Dry run: No changes would be made to order {order_id}")
+            self._print_update_summary(changes, dry_run=True)
             return 0
 
-        # Regular mode: apply and save the changes
-        if changes:
-            # Save the updated order
-            self.storage.save_order(updated_order)
+        # Apply updates to the order
+        self._apply_updates(order, args)
 
-            # Print summary of updates
-            print(f"Order {order_id} updated:")
-            for change in changes:
-                print(f"- {change}")
-        else:
-            print(f"No changes made to order {order_id}")
+        # Save the updated order
+        if changes:
+            self.storage.save_order(order)
+
+        # Print summary
+        self._print_update_summary(changes)
 
         return 0
