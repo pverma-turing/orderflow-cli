@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from orderflow.commands.base import Command
 
 
@@ -20,10 +22,23 @@ class UpdateCommand(Command):
         parser.add_argument('--remove-tag', action='append', default=[],
                             help='Tag to remove (can specify multiple times)')
         parser.add_argument('--note', help='Replace the order-level note')
+        parser.add_argument('--order-time', help='Update order time (ISO 8601 format, e.g., 2024-07-10T15:30:00)')
 
         # Dry-run flag
         parser.add_argument('--dry-run', action='store_true',
                             help='Preview changes without saving')
+
+    def _parse_iso_datetime(self, datetime_str):
+        """
+        Parse an ISO 8601 datetime string.
+        Returns a datetime object if valid, None otherwise.
+        """
+        try:
+            return datetime.fromisoformat(datetime_str)
+        except ValueError:
+            self.error(
+                f"Invalid datetime format: '{datetime_str}'. Expected ISO 8601 format (e.g., 2024-07-10T15:30:00)")
+            return None
 
     def _get_order_and_validate(self, order_id):
         """
@@ -79,8 +94,18 @@ class UpdateCommand(Command):
 
         # Check note change
         if args.note is not None:
-            if getattr(order, 'notes', '') != args.note:
+            if getattr(order, 'note', '') != args.note:
                 changes.append("Note updated")
+
+        # Check order time change
+        if args.order_time is not None:
+            new_time = self._parse_iso_datetime(args.order_time)
+            if new_time is not None:
+                current_time = getattr(order, 'order_time', None)
+                if current_time != new_time:
+                    # Format for display
+                    current_display = current_time.isoformat() if current_time else "None"
+                    changes.append(f"Order time: {current_display} → {new_time.isoformat()}")
 
         return changes
 
@@ -112,7 +137,13 @@ class UpdateCommand(Command):
 
         # Update note if provided
         if args.note is not None:
-            order.notes = args.note
+            order.note = args.note
+
+        # Update order time if provided and valid
+        if args.order_time is not None:
+            new_time = self._parse_iso_datetime(args.order_time)
+            if new_time is not None:
+                order.order_time = new_time
 
     def _print_update_summary(self, changes, dry_run=False):
         """
@@ -141,12 +172,17 @@ class UpdateCommand(Command):
             args.total is not None,
             len(args.add_tag) > 0,
             len(args.remove_tag) > 0,
-            args.note is not None
+            args.note is not None,
+            args.order_time is not None
         ]
 
         if not any(update_fields):
             self.error("At least one field must be provided to update")
             return 1
+
+        # If order time is provided, validate it early
+        if args.order_time is not None and self._parse_iso_datetime(args.order_time) is None:
+            return 1  # Error already printed by _parse_iso_datetime
 
         # Retrieve and validate the order
         order = self._get_order_and_validate(args.id)
