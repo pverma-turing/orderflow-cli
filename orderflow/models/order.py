@@ -10,7 +10,7 @@ class Order:
     DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
     def __init__(self, customer_name, dishes, order_total, status="new",
-                 order_id=None, order_time=None, tags=None, notes=None):
+                 order_id=None, order_time=None, tags=None, notes=None, status_history=None):
         # Validate customer name
         if not customer_name or not customer_name.strip():
             raise ValueError("Customer name cannot be empty")
@@ -85,6 +85,16 @@ class Order:
 
         # Handle notes (allow empty notes)
         self.notes = notes or ""
+        if status_history is None:
+            self.status_history = [(self.order_time, self.status, None)]
+        else:
+            # Handle backward compatibility with old format (timestamp, status)
+            self.status_history = []
+            for entry in status_history:
+                if len(entry) == 2:  # Old format without note
+                    self.status_history.append((entry[0], entry[1], None))
+                else:
+                    self.status_history.append(entry)  # New for
 
     def _parse_dishes(self, dishes):
         """
@@ -205,7 +215,8 @@ class Order:
             'status': self.status,
             'order_time': self.order_time,
             'tags': ','.join(self.tags) if self.tags else "",
-            'notes': self.notes
+            'notes': self.notes,
+            'status_history': self.status_history
         }
 
     @classmethod
@@ -250,7 +261,8 @@ class Order:
             order_id=data['order_id'],
             order_time=order_time,
             tags=tags,
-            notes=notes
+            notes=notes,
+            status_history=data.get("status_history", [(data["order_time"], data["status"])])
         )
 
     def are_dishes_equal(self, other_order, exact_match=True):

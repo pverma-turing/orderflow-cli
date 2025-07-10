@@ -1,212 +1,309 @@
-import argparse
+import datetime
+
 from orderflow.commands.base import Command
-from orderflow.models.order import Order
-from tabulate import tabulate
 
 
 class UpdateStatusCommand(Command):
-    """Command to update the status of one or multiple orders"""
-
-    VALID_STATUSES = Order.VALID_STATUSES
+    # Status transition rules dictionary
+    VALID_TRANSITIONS = {
+        "new": ["preparing", "canceled"],
+        "preparing": ["delivered", "canceled"],
+        "delivered": [],  # No further transitions allowed
+        "canceled": []  # No further transitions allowed
+    }
 
     def __init__(self, storage):
         self.storage = storage
 
     def add_arguments(self, parser):
-        # Parameter group for order identification
-        id_group = parser.add_mutually_exclusive_group(required=True)
+        # Create mutually exclusive group for status change vs rollback
+        action_group = parser.add_mutually_exclusive_group(required=True)
+        action_group.add_argument("--status", choices=["preparing", "delivered", "canceled"],
+                                  help="New status to set for the order(s)")
+        action_group.add_argument("--rollback", action="store_true",
+                                  help="Roll back to the previous status (cannot be used with --ids)")
 
-        # Single order ID (for backward compatibility)
-        id_group.add_argument(
-            'order_id',
-            nargs='?',
-            default=None,
-            help='ID of the order to update'
-        )
-
-        # New bulk update option
-        id_group.add_argument(
-            '--ids',
-            help='Comma-separated list of order IDs for bulk update'
-        )
-
-        # Required status parameter
-        parser.add_argument(
-            '--status',
-            choices=self.VALID_STATUSES,
-            required=True,
-            help=f'New status for the order(s) (choices: {", ".join(self.VALID_STATUSES)})'
-        )
-
-        # Add verbose option for detailed output
-        parser.add_argument(
-            '--verbose',
-            '-v',
-            action='store_true',
-            help='Show detailed information about each updated order'
-        )
-
-        # Add examples to epilog
-        parser.epilog = """
-Examples:
-  # Update a single order (positional argument)
-  orderflow update-status 12345678-abcd-1234-efgh-123456789abc --status preparing
-
-  # Update a single order with detailed output
-  orderflow update-status 12345678-abcd-1234-efgh-123456789abc --status delivered --verbose
-
-  # Bulk update multiple orders
-  orderflow update-status --ids "id1,id2,id3" --status preparing
-
-  # Bulk update with detailed information
-  orderflow update-status --ids "id1,id2,id3" --status canceled --verbose
-"""
+        parser.add_argument("--id", help="ID of order to update")
+        parser.add_argument("--ids", nargs="+", help="IDs of orders to update (not valid with --rollback)")
+        parser.add_argument("--note", help="Optional note to associate with this status change")
+        parser.add_argument("--show-history", action="store_true",
+                            help="Show the status history before applying changes (only works with --id)")
 
     def execute(self, args):
-        try:
-            # Determine if this is a bulk update or single update
+        # Check for invalid show-history combinations
+        if args.show_history and args.ids:
+            print("Warning: --show-history is ignored when using --ids for batch updates.")
+        elif args.show_history and args.rollback:
+            print("Warning: --show-history is ignored when using --rollback.")
+
+        # Validate arguments
+        if args.rollback:
             if args.ids:
-                return self._execute_bulk_update(args)
+                print("[Error] Bulk rollback with --ids is not supported. Please use --id for a single order.")
+                return
+            if args.note:
+                print("[Error] Cannot use --note with --rollback.")
+                return
+            if not args.id:
+                print("[Error] Order ID is required for rollback. Please use --id.")
+                return
+
+            # Process rollback for single order
+            self._process_rollback(args.id, self.storage)
+        else:
+            # Process normal status update (existing functionality)
+            # Get current timestamp for this update
+            timestamp = datetime.datetime.now().isoformat()
+
+            if args.ids:
+                self._process_batch_update(args.ids, args.status, args.note, timestamp, self.storage)
+            elif args.id:
+                # Show history if requested (and if using --id)
+                if args.show_history:
+                    self._display_status_history(args.id, self.storage)
+                    print()  # Add blank line for separation
+
+                self._process_single_update(args.id, args.status, args.note, timestamp, self.storage)
             else:
-                return self._execute_single_update(args)
+                # Interactive mode for single order update
+                order_id = input("Enter order ID: ").strip()
 
-        except ValueError as e:
-            print(f"Error: {str(e)}")
-            return None
-        except Exception as e:
-            print(f"Unexpected error: {str(e)}")
-            return None
+                # Show history if requested
+                if args.show_history:
+                    self._display_status_history(order_id, self.storage)
+                    print()  # Add blank line for separation
 
-    def _execute_single_update(self, args):
-        """Handle a single order update (backward compatibility)"""
-        # Validate order ID
-        if not args.order_id:
-            print("Error: Order ID is required")
-            return None
+                self._process_single_update(order_id, args.status, args.note, timestamp, self.storage)
 
-        # Get the order
-        order = self.storage.get_order(args.order_id)
+    def _display_status_history(self, order_id, storage):
+        """Display the order's status history in tabular format."""
+        order = storage.get_order(order_id)
 
         if not order:
-            print(f"Error: Order with ID {args.order_id} not found.")
-            return None
+            print(f"[Error] Order ID {order_id} not found.")
+            return False
 
-        # Update the status
-        old_status = order.status
-        order.status = args.status
+        # Handle orders without status_history (backward compatibility)
+        if not hasattr(order, 'status_history') or not order.status_history:
+            print(f"[Error] No status history available for Order ID {order_id}.")
+            return False
+
+        # Display order information and status history header
+        print(f"Order {order_id} - {order.customer_name}")
+        print(f"Created: {order.order_time}")
+        print("\nStatus History:")
+
+        # Determine table width based on content
+        has_notes = any(len(entry) > 2 and entry[2] for entry in order.status_history)
+        if has_notes:
+            print("-" * 90)
+            print(f"{'Timestamp':<25} {'Status':<15} {'Duration':<15} {'Note'}")
+            print("-" * 90)
+        else:
+            print("-" * 60)
+            print(f"{'Timestamp':<25} {'Status':<15} {'Duration':<15}")
+            print("-" * 60)
+
+        # Loop through history entries
+        prev_time = None
+        for i, entry in enumerate(order.status_history):
+            # Handle different entry formats (backward compatibility)
+            if len(entry) == 2:  # Old format: (timestamp, status)
+                timestamp, status, note = entry[0], entry[1], None
+            else:  # New format: (timestamp, status, note)
+                timestamp, status, note = entry
+
+            # Format the timestamp for display
+            dt = datetime.datetime.fromisoformat(timestamp)
+            formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Calculate duration
+            duration = ""
+            if i > 0 and prev_time:
+                prev_dt = datetime.datetime.fromisoformat(prev_time)
+                delta = dt - prev_dt
+                duration = str(delta).split('.')[0]  # Remove microseconds
+
+            # Print row with or without note
+            if has_notes:
+                note_text = note if note else ""
+                print(f"{formatted_time:<25} {status:<15} {duration:<15} {note_text}")
+            else:
+                print(f"{formatted_time:<25} {status:<15} {duration:<15}")
+
+            prev_time = timestamp
+
+        # Print footer line with appropriate width
+        if has_notes:
+            print("-" * 90)
+        else:
+            print("-" * 60)
+
+        # Calculate and display total time since order creation
+        if len(order.status_history) > 0:
+            first_timestamp = order.status_history[0][0]
+            first_dt = datetime.datetime.fromisoformat(first_timestamp)
+            current_dt = datetime.datetime.now()
+            total_time = current_dt - first_dt
+            print(f"Total time since order creation: {str(total_time).split('.')[0]}")
+
+        # Display current status
+        print(f"Current status: {order.status}")
+        return True
+
+    def _format_timestamp_for_display(self, timestamp):
+        """Convert ISO timestamp to human-readable format."""
+        dt = datetime.datetime.fromisoformat(timestamp)
+        return dt.strftime("%Y-%m-%d %H:%M")
+
+    def _display_status_change_summary(self, order_id, old_status, new_status, timestamp, note=None):
+        """Display a summary of status change in a consistent format."""
+        human_time = self._format_timestamp_for_display(timestamp)
+
+        summary = f"Order ID {order_id}: Status changed from '{old_status}' to '{new_status}' at {human_time}"
+        if note:
+            summary += f" [Note: {note}]"
+
+        print(summary)
+
+    def _process_rollback(self, order_id, storage):
+        order = storage.get_order(order_id)
+
+        if not order:
+            print(f"[Error] Order ID {order_id} not found.")
+            return
+
+        # Check if there's a status history to roll back
+        if not hasattr(order, 'status_history'):
+            print(f"[Error] No status history available for Order ID {order_id}.")
+            return
+
+        if len(order.status_history) <= 1:
+            print(f"[Error] Cannot rollback Order ID {order_id}. Only one status entry exists.")
+            return
+
+        # Display current status before rollback
+        print(f"Order {order_id} - Current status: {order.status}")
+
+        # Remove the most recent status entry
+        most_recent = order.status_history.pop()
+
+        # Get the previous status (now the last one in the list)
+        previous_entry = order.status_history[-1]
+        previous_status = previous_entry[1]
+
+        # Update the order's current status
+        current_status = order.status
+        order.status = previous_status
 
         # Save the updated order
-        updated_order = self.storage.save_order(order)
+        storage.save_order(order)
 
-        if updated_order:
-            print(f"Order {order.order_id} status updated from '{old_status}' to '{args.status}'")
+        # Show rollback confirmation with details
+        rolled_back_from = most_recent[1]
+        rolled_back_to = previous_status
 
-            # Display additional order details if verbose mode
-            if args.verbose:
-                print(f"Customer: {order.customer_name}")
-                print(f"Dishes: {', '.join(order.dish_names)}")
-                print(f"Total: ${order.order_total:.2f}")
-                if order.tags:
-                    print(f"Tags: {', '.join(order.tags)}")
+        print(f"Status rolled back from '{rolled_back_from}' to '{rolled_back_to}'")
 
-            return updated_order
-        else:
-            print("Failed to update order status. Please check the errors above.")
-            return None
+        # If the rolled back entry had a note, display it
+        if len(most_recent) > 2 and most_recent[2]:
+            print(f"Removed note: {most_recent[2]}")
 
-    def _execute_bulk_update(self, args):
-        """Handle bulk update of multiple orders using batch operations"""
-        # Parse the comma-separated list of IDs
-        order_ids = [order_id.strip() for order_id in args.ids.split(',') if order_id.strip()]
+    def _process_batch_update(self, order_ids, status, note, timestamp, storage):
+        # Batch update with validation for each order
+        results = {"updated": [], "invalid_transition": [], "already_final": [], "not_found": []}
 
-        if not order_ids:
-            print("Error: No valid order IDs provided.")
-            return None
-
-        # Get all specified orders in a single operation
-        orders = self.storage.get_orders_by_ids(order_ids) if hasattr(self.storage, 'get_orders_by_ids') else [
-            self.storage.get_order(order_id) for order_id in order_ids
-        ]
-
-        # Initialize counters
-        successful_updates = 0
-        not_found = 0
-        failed_updates = 0
-        unchanged = 0
-
-        # Track orders to update in batch
-        to_update = []
-        results_data = []
-
-        # Process orders
-        for i, order_id in enumerate(order_ids):
-            order = orders[i] if i < len(orders) and orders[i] else None
-
+        for order_id in order_ids:
+            order = storage.get_order(order_id)
             if not order:
-                not_found += 1
-                results_data.append([order_id[:8] + "...", "Not Found", "-", "-"])
+                print(f"[Error] Order ID {order_id} not found.")
+                results["not_found"].append(order_id)
                 continue
 
-            # Skip orders that are already in the target status
-            if order.status == args.status:
-                unchanged += 1
-                results_data.append([
-                    order_id[:8] + "...",
-                    "Unchanged",
-                    args.status,
-                    "Already in target status"
-                ])
+            # Display current status
+            current_status = order.status
+            print(f"Order {order_id} - Current status: {current_status}")
+
+            # Check if already in final state
+            if current_status in ["delivered", "canceled"]:
+                print(f"[Error] Cannot update Order ID {order_id}. Already in final state '{current_status}'.")
+                results["already_final"].append(order_id)
                 continue
 
-            # Store old status for reporting
-            old_status = order.status
+            # Check if transition is valid
+            if status not in self.VALID_TRANSITIONS[current_status]:
+                print(f"[Error] Invalid transition from '{current_status}' to '{status}' for Order ID {order_id}.")
+                results["invalid_transition"].append(order_id)
+                continue
 
-            # Update the status
-            order.status = args.status
+            # Update the order status
+            order.status = status
 
-            # Add to batch update list
-            to_update.append(order)
-            results_data.append([
-                order_id[:8] + "...",
-                "Pending",
-                f"{old_status} → {args.status}",
-                order.customer_name[:15] + ("..." if len(order.customer_name) > 15 else "")
-            ])
+            # Initialize status_history if it doesn't exist (backward compatibility)
+            if not hasattr(order, 'status_history'):
+                order.status_history = [(order.order_time, "new", None)]
 
-        # Save all updates in a single operation if the storage supports it
-        updated_orders = []
-        if to_update:
-            if hasattr(self.storage, 'save_orders_batch'):
-                updated_orders = self.storage.save_orders_batch(to_update)
-                successful_updates = len(updated_orders)
-                failed_updates = len(to_update) - successful_updates
-            else:
-                # Fall back to individual updates
-                for order in to_update:
-                    if self.storage.save_order(order):
-                        successful_updates += 1
-                        updated_orders.append(order)
-                    else:
-                        failed_updates += 1
+            # Add new status to history with optional note
+            order.status_history.append((timestamp, status, note))
 
-        # Update results for reporting
-        for i, result in enumerate(results_data):
-            if result[1] == "Pending":
-                results_data[i][1] = "Success" if i < successful_updates else "Failed"
+            # Save the updated order
+            storage.save_order(order)
 
-        # Print summary
-        total_processed = len(order_ids)
-        print(f"\nBulk Status Update Summary:")
-        print(f"  Total orders processed: {total_processed}")
-        print(f"  Successfully updated:   {successful_updates}")
-        print(f"  Already in target status: {unchanged}")
-        print(f"  Not found:             {not_found}")
-        print(f"  Failed to update:      {failed_updates}")
+            # Display summary of the status change
+            self._display_status_change_summary(order_id, current_status, status, timestamp, note)
 
-        # Print detailed results in verbose mode
-        if args.verbose and results_data:
-            print("\nDetailed Results:")
-            headers = ["Order ID", "Result", "Status Change", "Customer"]
-            print(tabulate(results_data, headers=headers, tablefmt="simple"))
+            results["updated"].append(order_id)
 
-        return updated_orders
+        # Summary report
+        print("\nSummary:")
+        print(f"  Updated: {len(results['updated'])} orders")
+        print(f"  Invalid transitions: {len(results['invalid_transition'])} orders")
+        print(f"  Already in final state: {len(results['already_final'])} orders")
+        print(f"  Not found: {len(results['not_found'])} orders")
+
+    def _process_single_update(self, order_id, status, note, timestamp, storage):
+        order = storage.get_order(order_id)
+
+        if not order:
+            print(f"[Error] Order ID {order_id} not found.")
+            return
+
+        # Get current status before update
+        current_status = order.status
+        print(f"Current status: {current_status}")
+
+        # Check if already in final state
+        if current_status in ["delivered", "canceled"]:
+            print(f"[Error] Cannot update Order ID {order_id}. Already in final state '{current_status}'.")
+            return
+
+        # Check if transition is valid
+        if status not in self.VALID_TRANSITIONS[current_status]:
+            print(f"[Error] Invalid transition from '{current_status}' to '{status}' for Order ID {order_id}.")
+            return
+
+        # Update the order status
+        order.status = status
+
+        # Initialize status_history if it doesn't exist (backward compatibility)
+        if not hasattr(order, 'status_history'):
+            order.status_history = [(order.order_time, "new", None)]
+
+        # Add new status to history with optional note
+        order.status_history.append((timestamp, status, note))
+
+        # Save the updated order
+        storage.save_order(order)
+
+        # Display summary of the status change
+        self._display_status_change_summary(order_id, current_status, status, timestamp, note)
+
+    def _process_interactive_update(self, status, note, show_history, timestamp, storage):
+        order_id = input("Enter order ID: ").strip()
+
+        # Show history if requested
+        if show_history:
+            self._display_status_history(order_id, storage)
+            print()  # Add blank line for separation
+
+        self._process_single_update(order_id, status, note, timestamp, storage)
