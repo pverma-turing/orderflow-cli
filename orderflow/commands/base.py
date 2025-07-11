@@ -13,3 +13,9 @@ class Command(ABC):
     def execute(self, args):
         """Execute the command with given arguments"""
         pass
+
+    def warn(self, msg):
+        print(f"[WARNING] {msg}")
+
+    def error(self, msg):
+        print(f"[ERROR] {msg}")
