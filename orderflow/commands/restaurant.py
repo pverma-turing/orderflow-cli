@@ -13,11 +13,14 @@ class RestaurantCommand(Command):
     def __init__(self, storage):
         self.storage = storage
 
+    # Valid fields for sorting
+    VALID_SORT_FIELDS = ['name', 'location', 'cuisine']
+
     def add_arguments(self, parser):
         """Add restaurant command arguments."""
         restaurant_subparsers = parser.add_subparsers(dest='action', help='Restaurant action to perform')
 
-        # Register subcommand
+        # Register subcommand remains the same
         register_parser = restaurant_subparsers.add_parser('register', help='Register a new restaurant')
         register_parser.add_argument('--id', required=True, help='Unique restaurant ID')
         register_parser.add_argument('--name', required=True, help='Restaurant name')
@@ -25,12 +28,13 @@ class RestaurantCommand(Command):
         register_parser.add_argument('--location', help='Restaurant location')
         register_parser.add_argument('--contact', help='Contact information')
 
-        # List subcommand - updated
+        # List subcommand - updated with sort-by option
         list_parser = restaurant_subparsers.add_parser('list', help='List all registered restaurants')
         list_parser.add_argument('--search', help='Filter restaurants by name (case-insensitive)')
         list_parser.add_argument('--cuisine', help='Filter restaurants by cuisine (case-insensitive)')
+        list_parser.add_argument('--sort-by', help='Sort results by field (name, location, cuisine)')
 
-        # Other subparsers remain the same...
+        # Other subparsers remain the same
         use_parser = restaurant_subparsers.add_parser('use', help='Set the active restaurant context')
         use_parser.add_argument('--id', required=True, help='Restaurant ID to use')
 
@@ -330,10 +334,10 @@ class RestaurantCommand(Command):
         return self._restaurant_exists(restaurant_id)
 
     def list_restaurants(self, args=None):
-        """List all restaurants, optionally filtered by search keyword and/or cuisine.
+        """List all restaurants, optionally filtered and sorted.
 
         Args:
-            args: Command arguments, may include search and cuisine parameters
+            args: Command arguments, may include search, cuisine, and sort-by parameters
 
         Returns:
             bool: True if successful, False otherwise
@@ -379,6 +383,23 @@ class RestaurantCommand(Command):
                     # Only cuisine filter was applied
                     print(f"[Info] No restaurants found for cuisine '{args.cuisine}'")
                 return True
+
+        # Apply sorting if specified
+        sort_applied = args and hasattr(args, 'sort_by') and args.sort_by
+        if sort_applied:
+            sort_field = args.sort_by.lower()
+
+            # Validate sort field
+            if sort_field not in self.VALID_SORT_FIELDS:
+                print(
+                    f"[Error] Unsupported sort field '{sort_field}'. Allowed values: {', '.join(self.VALID_SORT_FIELDS)}")
+                return False
+
+            # Sort the filtered results
+            filtered_restaurants = sorted(
+                filtered_restaurants,
+                key=lambda r: r.get(sort_field, '').lower()  # Case-insensitive sort
+            )
 
         # Prepare table data
         table_data = []
