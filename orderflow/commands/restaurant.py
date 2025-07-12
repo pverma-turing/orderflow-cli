@@ -330,10 +330,10 @@ class RestaurantCommand(Command):
         return self._restaurant_exists(restaurant_id)
 
     def list_restaurants(self, args=None):
-        """List all restaurants, optionally filtered by search keyword.
+        """List all restaurants, optionally filtered by search keyword and/or cuisine.
 
         Args:
-            args: Command arguments, may include search parameter
+            args: Command arguments, may include search and cuisine parameters
 
         Returns:
             bool: True if successful, False otherwise
@@ -344,18 +344,40 @@ class RestaurantCommand(Command):
             print("No restaurants registered yet.")
             return True
 
+        # Track which filters are applied for appropriate messaging
+        search_applied = args and hasattr(args, 'search') and args.search
+        cuisine_applied = args and hasattr(args, 'cuisine') and args.cuisine
+
         # Apply search filter if specified
         filtered_restaurants = restaurants
-        if args and hasattr(args, 'search') and args.search:
+        if search_applied:
             search_keyword = args.search.lower()
             filtered_restaurants = [
-                r for r in restaurants
+                r for r in filtered_restaurants
                 if search_keyword in r.get('name', '').lower()
             ]
 
-            # Display info message if no matches found
-            if not filtered_restaurants:
+            # If no results after search filter and no cuisine filter applied yet
+            if not filtered_restaurants and not cuisine_applied:
                 print(f"[Info] No restaurants found matching '{args.search}'")
+                return True
+
+        # Apply cuisine filter if specified
+        if cuisine_applied:
+            cuisine_name = args.cuisine.lower()
+            filtered_restaurants = [
+                r for r in filtered_restaurants
+                if r.get('cuisine', '').lower() == cuisine_name
+            ]
+
+            # If no results after cuisine filter
+            if not filtered_restaurants:
+                if search_applied:
+                    # Both filters were applied
+                    print(f"[Info] No restaurants found matching '{args.search}' with cuisine '{args.cuisine}'")
+                else:
+                    # Only cuisine filter was applied
+                    print(f"[Info] No restaurants found for cuisine '{args.cuisine}'")
                 return True
 
         # Prepare table data
