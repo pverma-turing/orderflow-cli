@@ -25,18 +25,18 @@ class RestaurantCommand(Command):
         register_parser.add_argument('--location', help='Restaurant location')
         register_parser.add_argument('--contact', help='Contact information')
 
-        # List subcommand
-        restaurant_subparsers.add_parser('list', help='List all registered restaurants')
+        # List subcommand - updated
+        list_parser = restaurant_subparsers.add_parser('list', help='List all registered restaurants')
+        list_parser.add_argument('--search', help='Filter restaurants by name (case-insensitive)')
+        list_parser.add_argument('--cuisine', help='Filter restaurants by cuisine (case-insensitive)')
 
-        # Use subcommand
+        # Other subparsers remain the same...
         use_parser = restaurant_subparsers.add_parser('use', help='Set the active restaurant context')
         use_parser.add_argument('--id', required=True, help='Restaurant ID to use')
 
-        # Show subcommand
         show_parser = restaurant_subparsers.add_parser('show', help='Show details of a specific restaurant')
         show_parser.add_argument('--id', required=True, help='Restaurant ID to show')
 
-        # Edit subcommand (new)
         edit_parser = restaurant_subparsers.add_parser('edit', help='Edit a restaurant\'s details')
         edit_parser.add_argument('--id', required=True, help='Restaurant ID to edit')
         edit_parser.add_argument('--name', help='New restaurant name')
@@ -53,7 +53,7 @@ class RestaurantCommand(Command):
         if args.action == 'register':
             return self.register_restaurant(args)
         elif args.action == 'list':
-            return self.list_restaurants()
+            return self.list_restaurants(args)
         elif args.action == 'use':
             return self.use_restaurant(args)
         elif args.action == 'show':
@@ -329,31 +329,59 @@ class RestaurantCommand(Command):
         """
         return self._restaurant_exists(restaurant_id)
 
-    def list_restaurants(self):
-        """List all registered restaurants."""
+    def list_restaurants(self, args=None):
+        """List all restaurants, optionally filtered by search keyword.
+
+        Args:
+            args: Command arguments, may include search parameter
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
         restaurants = self._load_restaurants()
+
         if not restaurants:
             print("No restaurants registered yet.")
             return True
 
+        # Apply search filter if specified
+        filtered_restaurants = restaurants
+        if args and hasattr(args, 'search') and args.search:
+            search_keyword = args.search.lower()
+            filtered_restaurants = [
+                r for r in restaurants
+                if search_keyword in r.get('name', '').lower()
+            ]
+
+            # Display info message if no matches found
+            if not filtered_restaurants:
+                print(f"[Info] No restaurants found matching '{args.search}'")
+                return True
+
         # Prepare table data
-        table_data = [[r['id'], r['name'], r['location']] for r in restaurants]
-        headers = ['ID', 'Name', 'Location']
+        table_data = []
+        for restaurant in filtered_restaurants:
+            # Convert to Restaurant model to ensure consistent data access
+            r = Restaurant.from_dict(restaurant)
+            table_data.append([
+                r.id,
+                r.name,
+                r.cuisine or '',  # Handle None values
+                r.location or ''
+            ])
 
-        # Print table using tabulate
+        # Display table with the results
+        headers = ['ID', 'Name', 'Cuisine', 'Location']
         print(tabulate(table_data, headers=headers, tablefmt='pretty'))
-        return True
 
-    def _validate_unique_id(self, restaurant_id):
-        """Check if the restaurant ID is unique."""
-        restaurants = self._load_restaurants()
-        for restaurant in restaurants:
-            if restaurant['id'] == restaurant_id:
-                return False
         return True
 
     def _load_restaurants(self):
-        """Load restaurants from restaurants.json."""
+        """Load restaurants from restaurants.json.
+
+        Returns:
+            list: List of restaurant dictionaries, or empty list if none found
+        """
         restaurants_file = Path('data/restaurants.json')
         if not restaurants_file.exists():
             return []
@@ -367,6 +395,14 @@ class RestaurantCommand(Command):
         except Exception as e:
             print(f"Error loading restaurants: {e}")
             return []
+
+    def _validate_unique_id(self, restaurant_id):
+        """Check if the restaurant ID is unique."""
+        restaurants = self._load_restaurants()
+        for restaurant in restaurants:
+            if restaurant['id'] == restaurant_id:
+                return False
+        return True
 
     def _add_to_restaurants_json(self, restaurant):
         """Add a new restaurant to restaurants.json."""
