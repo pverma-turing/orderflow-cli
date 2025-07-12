@@ -6,7 +6,7 @@ from orderflow.core.parser import create_parser
 def main():
     """Main entry point for the application"""
     # Initialize storage
-    storage = JsonStorage()
+    storage = JsonStorage("burger123")
 
     # Create parser
     parser = create_parser(storage)

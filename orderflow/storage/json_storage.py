@@ -1,61 +1,143 @@
+import datetime
 import json
 import os
+import shutil
 import sys
+from pathlib import Path
+
 from orderflow.models.order import Order
 from orderflow.storage.base import Storage
 
 
 class JsonStorage(Storage):
     """JSON file-based storage implementation with robust error handling"""
+    def __init__(self, restaurant_id):
+        """Initialize storage for a specific restaurant.
 
-    def __init__(self, file_path="orders.json"):
-        self.file_path = file_path
+        Args:
+            restaurant_id (str): ID of the restaurant to store orders for
+
+        Raises:
+            ValueError: If the restaurant_id doesn't exist in restaurants.json
+        """
+        self.restaurant_id = restaurant_id
+
+        # Validate that restaurant exists in registry
+        if not self._validate_restaurant_exists():
+            raise ValueError(f"Restaurant ID '{restaurant_id}' not found in restaurants.json")
+
+        # Set file path based on restaurant ID
+        self.file_path = Path(f"data/{restaurant_id}/orders.json")
+
+        # Ensure storage file exists
         self._ensure_storage_exists()
 
+    def _validate_restaurant_exists(self):
+        """Check if the restaurant ID exists in the central registry.
+
+        Returns:
+            bool: True if restaurant exists, False otherwise
+        """
+        restaurants_file = Path("data/restaurants.json")
+
+        # If the registry doesn't exist, restaurant can't exist
+        if not restaurants_file.exists():
+            return False
+
+        try:
+            with open(restaurants_file, 'r') as f:
+                restaurants = json.load(f)
+
+            # Check if any restaurant has the matching ID
+            return any(restaurant['id'] == self.restaurant_id for restaurant in restaurants)
+        except (json.JSONDecodeError, IOError, KeyError):
+            # If there's any error reading the file or accessing data, assume restaurant doesn't exist
+            return False
+
     def _ensure_storage_exists(self):
-        """Make sure the storage file exists and is properly formatted"""
-        if not os.path.exists(self.file_path):
-            # Create a new empty storage file
-            try:
-                with open(self.file_path, 'w') as f:
-                    json.dump([], f)
-                print(f"Created new storage file at {self.file_path}")
-            except (PermissionError, IOError) as e:
-                print(f"Error: Cannot create storage file at {self.file_path}")
-                print(f"Details: {str(e)}")
-                sys.exit(1)
+        """Ensure that the restaurant data folder and orders file exist.
+
+        Creates the restaurant folder and orders.json file if they don't exist.
+        Makes a backup of existing file before creating a new one if needed.
+        """
+        # Create directory if it doesn't exist
+        restaurant_dir = self.file_path.parent
+        restaurant_dir.mkdir(exist_ok=True, parents=True)
+
+        # Create file if it doesn't exist
+        if not self.file_path.exists():
+            with open(self.file_path, 'w') as f:
+                json.dump([], f)
         else:
-            # Validate existing file
+            # Validate existing file structure
             try:
                 with open(self.file_path, 'r') as f:
                     data = json.load(f)
-                    # Ensure it's a list
-                    if not isinstance(data, list):
-                        raise ValueError("Storage file contains invalid format (expected a list)")
-            except json.JSONDecodeError:
-                # File exists but is not valid JSON
-                print(f"Warning: Storage file {self.file_path} is malformed.")
-                backup_path = f"{self.file_path}.bak"
-                print(f"Creating backup at {backup_path} and initializing new file.")
-                try:
-                    # Create backup of bad file
-                    if os.path.getsize(self.file_path) > 0:
-                        with open(self.file_path, 'r') as src, open(backup_path, 'w') as dst:
-                            dst.write(src.read())
-                    # Reset the file
+
+                if not isinstance(data, list):
+                    # Invalid format, make backup and create new file
+                    backup_path = self.file_path.with_suffix('.json.bak')
+                    shutil.copy2(self.file_path, backup_path)
+                    print(f"Warning: Invalid storage format. Backup created at {backup_path}")
+
+                    # Create new empty orders file
                     with open(self.file_path, 'w') as f:
                         json.dump([], f)
-                except (PermissionError, IOError) as e:
-                    print(f"Error: Failed to fix storage file.")
-                    print(f"Details: {str(e)}")
-                    sys.exit(1)
-            except (PermissionError, IOError) as e:
-                print(f"Error: Cannot access storage file at {self.file_path}")
-                print(f"Details: {str(e)}")
-                sys.exit(1)
-            except Exception as e:
-                print(f"Error: Unexpected issue with storage file: {str(e)}")
-                sys.exit(1)
+            except (json.JSONDecodeError, IOError):
+                # Corrupted file, make backup and create new file
+                backup_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                backup_path = self.file_path.with_name(f"orders_{backup_time}.json.bak")
+                shutil.copy2(self.file_path, backup_path)
+                print(f"Warning: Corrupted storage file. Backup created at {backup_path}")
+
+                # Create new empty orders file
+                with open(self.file_path, 'w') as f:
+                    json.dump([], f)
+
+    # def _ensure_storage_exists(self):
+    #     """Make sure the storage file exists and is properly formatted"""
+    #     if not os.path.exists(self.file_path):
+    #         # Create a new empty storage file
+    #         try:
+    #             with open(self.file_path, 'w') as f:
+    #                 json.dump([], f)
+    #             print(f"Created new storage file at {self.file_path}")
+    #         except (PermissionError, IOError) as e:
+    #             print(f"Error: Cannot create storage file at {self.file_path}")
+    #             print(f"Details: {str(e)}")
+    #             sys.exit(1)
+    #     else:
+    #         # Validate existing file
+    #         try:
+    #             with open(self.file_path, 'r') as f:
+    #                 data = json.load(f)
+    #                 # Ensure it's a list
+    #                 if not isinstance(data, list):
+    #                     raise ValueError("Storage file contains invalid format (expected a list)")
+    #         except json.JSONDecodeError:
+    #             # File exists but is not valid JSON
+    #             print(f"Warning: Storage file {self.file_path} is malformed.")
+    #             backup_path = f"{self.file_path}.bak"
+    #             print(f"Creating backup at {backup_path} and initializing new file.")
+    #             try:
+    #                 # Create backup of bad file
+    #                 if os.path.getsize(self.file_path) > 0:
+    #                     with open(self.file_path, 'r') as src, open(backup_path, 'w') as dst:
+    #                         dst.write(src.read())
+    #                 # Reset the file
+    #                 with open(self.file_path, 'w') as f:
+    #                     json.dump([], f)
+    #             except (PermissionError, IOError) as e:
+    #                 print(f"Error: Failed to fix storage file.")
+    #                 print(f"Details: {str(e)}")
+    #                 sys.exit(1)
+    #         except (PermissionError, IOError) as e:
+    #             print(f"Error: Cannot access storage file at {self.file_path}")
+    #             print(f"Details: {str(e)}")
+    #             sys.exit(1)
+    #         except Exception as e:
+    #             print(f"Error: Unexpected issue with storage file: {str(e)}")
+    #             sys.exit(1)
 
     def _read_all(self):
         """Read all data from storage with error handling"""
