@@ -4,6 +4,7 @@ from pathlib import Path
 from tabulate import tabulate
 
 from orderflow.commands.base import Command
+from orderflow.models.restaurant import Restaurant
 
 
 class RestaurantCommand(Command):
@@ -20,19 +21,25 @@ class RestaurantCommand(Command):
         register_parser = restaurant_subparsers.add_parser('register', help='Register a new restaurant')
         register_parser.add_argument('--id', required=True, help='Unique restaurant ID')
         register_parser.add_argument('--name', required=True, help='Restaurant name')
+        register_parser.add_argument('--cuisine', help='Type of cuisine')  # Added cuisine field
         register_parser.add_argument('--location', help='Restaurant location')
+        register_parser.add_argument('--contact', help='Contact information')  # Added contact field
 
         # List subcommand
         restaurant_subparsers.add_parser('list', help='List all registered restaurants')
 
-        # Use subcommand (new)
+        # Use subcommand
         use_parser = restaurant_subparsers.add_parser('use', help='Set the active restaurant context')
         use_parser.add_argument('--id', required=True, help='Restaurant ID to use')
+
+        # Show subcommand (new)
+        show_parser = restaurant_subparsers.add_parser('show', help='Show details of a specific restaurant')
+        show_parser.add_argument('--id', required=True, help='Restaurant ID to show')
 
     def execute(self, args):
         """Execute the restaurant command based on the action."""
         if not hasattr(args, 'action') or not args.action:
-            print("Error: Please specify an action (register, list, or use)")
+            print("Error: Please specify an action (register, list, use, or show)")
             return False
 
         if args.action == 'register':
@@ -41,9 +48,101 @@ class RestaurantCommand(Command):
             return self.list_restaurants()
         elif args.action == 'use':
             return self.use_restaurant(args)
+        elif args.action == 'show':
+            return self.show_restaurant(args)
         else:
             print(f"Error: Unknown action '{args.action}'")
             return False
+
+    def show_restaurant(self, args):
+        """Show details of a specific restaurant.
+
+        Args:
+            args: Command arguments with restaurant ID
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        restaurant_id = args.id
+        restaurant = self._get_restaurant_by_id(restaurant_id)
+
+        if not restaurant:
+            print(f"[Error] Restaurant with ID '{restaurant_id}' not found.")
+            return False
+
+        # Convert dict to Restaurant model
+        restaurant_model = Restaurant.from_dict(restaurant)
+
+        # Print restaurant details in aligned format
+        print(f"ID       : {restaurant_model.id}")
+        print(f"Name     : {restaurant_model.name}")
+
+        if restaurant_model.cuisine:
+            print(f"Cuisine  : {restaurant_model.cuisine}")
+
+        if restaurant_model.location:
+            print(f"Location : {restaurant_model.location}")
+
+        if restaurant_model.contact:
+            print(f"Contact  : {restaurant_model.contact}")
+
+        return True
+
+    def _get_restaurant_by_id(self, restaurant_id):
+        """Get a restaurant by ID from the registry.
+
+        Args:
+            restaurant_id (str): ID of the restaurant to find
+
+        Returns:
+            dict: Restaurant data or None if not found
+        """
+        restaurants_file = Path("data/restaurants.json")
+
+        if not restaurants_file.exists():
+            return None
+
+        try:
+            with open(restaurants_file, 'r') as f:
+                restaurants = json.load(f)
+
+            # Find restaurant with matching ID
+            for restaurant in restaurants:
+                if restaurant.get('id') == restaurant_id:
+                    return restaurant
+
+            return None
+        except (json.JSONDecodeError, IOError):
+            return None
+
+    def register_restaurant(self, args):
+        """Register a new restaurant."""
+        # Ensure the restaurant ID is unique
+        if not self._validate_unique_id(args.id):
+            print(f"Error: Restaurant with ID '{args.id}' already exists")
+            return False
+
+        # Create restaurant model and convert to dict
+        restaurant = Restaurant(
+            id=args.id,
+            name=args.name,
+            cuisine=args.cuisine if hasattr(args, 'cuisine') else None,
+            location=args.location if hasattr(args, 'location') else None,
+            contact=args.contact if hasattr(args, 'contact') else None
+        )
+
+        restaurant_dict = restaurant.to_dict()
+
+        # Add to restaurants.json
+        if not self._add_to_restaurants_json(restaurant_dict):
+            return False
+
+        # Create restaurant data folder and orders.json file
+        if not self._create_restaurant_data_structure(args.id):
+            return False
+
+        print(f"Successfully registered restaurant: {args.name} (ID: {args.id})")
+        return True
 
     def use_restaurant(self, args):
         """Set the active restaurant context.
@@ -113,31 +212,6 @@ class RestaurantCommand(Command):
         except (json.JSONDecodeError, IOError, KeyError):
             # If there's any error reading the file or accessing data, assume restaurant doesn't exist
             return False
-
-    def register_restaurant(self, args):
-        """Register a new restaurant."""
-        # Ensure the restaurant ID is unique
-        if not self._validate_unique_id(args.id):
-            print(f"Error: Restaurant with ID '{args.id}' already exists")
-            return False
-
-        # Create restaurant entry
-        restaurant = {
-            'id': args.id,
-            'name': args.name,
-            'location': args.location or ''
-        }
-
-        # Add to restaurants.json
-        if not self._add_to_restaurants_json(restaurant):
-            return False
-
-        # Create restaurant data folder and orders.json file
-        if not self._create_restaurant_data_structure(args.id):
-            return False
-
-        print(f"Successfully registered restaurant: {args.name} (ID: {args.id})")
-        return True
 
     def list_restaurants(self):
         """List all registered restaurants."""
