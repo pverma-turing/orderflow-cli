@@ -25,18 +25,93 @@ class RestaurantCommand(Command):
         # List subcommand
         restaurant_subparsers.add_parser('list', help='List all registered restaurants')
 
+        # Use subcommand (new)
+        use_parser = restaurant_subparsers.add_parser('use', help='Set the active restaurant context')
+        use_parser.add_argument('--id', required=True, help='Restaurant ID to use')
+
     def execute(self, args):
         """Execute the restaurant command based on the action."""
         if not hasattr(args, 'action') or not args.action:
-            print("Error: Please specify an action (register or list)")
+            print("Error: Please specify an action (register, list, or use)")
             return False
 
         if args.action == 'register':
             return self.register_restaurant(args)
         elif args.action == 'list':
             return self.list_restaurants()
+        elif args.action == 'use':
+            return self.use_restaurant(args)
         else:
             print(f"Error: Unknown action '{args.action}'")
+            return False
+
+    def use_restaurant(self, args):
+        """Set the active restaurant context.
+
+        Args:
+            args: Command arguments with restaurant ID
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        restaurant_id = args.id
+
+        # Validate restaurant exists
+        if not self._validate_restaurant_exists(restaurant_id):
+            print(f"Error: Restaurant ID '{restaurant_id}' not found in restaurants.json")
+            return False
+
+        # Save to config file
+        config_path = Path('.orderflowrc')
+        config = {}
+
+        try:
+            # Try to load existing config if it exists
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            # If there's an error loading the file, create a new config
+            print(f"Notice: Creating new configuration file (.orderflowrc)")
+            config = {}
+
+        # Update the active restaurant
+        config['active_restaurant'] = restaurant_id
+
+        try:
+            # Save the updated config
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            print(f"Now using restaurant: {restaurant_id}")
+            return True
+        except IOError as e:
+            print(f"Error saving configuration: {e}")
+            return False
+
+    def _validate_restaurant_exists(self, restaurant_id):
+        """Check if the restaurant ID exists in the central registry.
+
+        Args:
+            restaurant_id (str): ID to validate
+
+        Returns:
+            bool: True if restaurant exists, False otherwise
+        """
+        restaurants_file = Path("data/restaurants.json")
+
+        # If the registry doesn't exist, restaurant can't exist
+        if not restaurants_file.exists():
+            return False
+
+        try:
+            with open(restaurants_file, 'r') as f:
+                restaurants = json.load(f)
+
+            # Check if any restaurant has the matching ID
+            return any(restaurant['id'] == restaurant_id for restaurant in restaurants)
+        except (json.JSONDecodeError, IOError, KeyError):
+            # If there's any error reading the file or accessing data, assume restaurant doesn't exist
             return False
 
     def register_restaurant(self, args):
