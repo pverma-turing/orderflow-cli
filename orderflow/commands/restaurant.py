@@ -21,9 +21,9 @@ class RestaurantCommand(Command):
         register_parser = restaurant_subparsers.add_parser('register', help='Register a new restaurant')
         register_parser.add_argument('--id', required=True, help='Unique restaurant ID')
         register_parser.add_argument('--name', required=True, help='Restaurant name')
-        register_parser.add_argument('--cuisine', help='Type of cuisine')  # Added cuisine field
+        register_parser.add_argument('--cuisine', help='Type of cuisine')
         register_parser.add_argument('--location', help='Restaurant location')
-        register_parser.add_argument('--contact', help='Contact information')  # Added contact field
+        register_parser.add_argument('--contact', help='Contact information')
 
         # List subcommand
         restaurant_subparsers.add_parser('list', help='List all registered restaurants')
@@ -32,14 +32,22 @@ class RestaurantCommand(Command):
         use_parser = restaurant_subparsers.add_parser('use', help='Set the active restaurant context')
         use_parser.add_argument('--id', required=True, help='Restaurant ID to use')
 
-        # Show subcommand (new)
+        # Show subcommand
         show_parser = restaurant_subparsers.add_parser('show', help='Show details of a specific restaurant')
         show_parser.add_argument('--id', required=True, help='Restaurant ID to show')
+
+        # Edit subcommand (new)
+        edit_parser = restaurant_subparsers.add_parser('edit', help='Edit a restaurant\'s details')
+        edit_parser.add_argument('--id', required=True, help='Restaurant ID to edit')
+        edit_parser.add_argument('--name', help='New restaurant name')
+        edit_parser.add_argument('--cuisine', help='New cuisine type')
+        edit_parser.add_argument('--location', help='New restaurant location')
+        edit_parser.add_argument('--contact', help='New contact information')
 
     def execute(self, args):
         """Execute the restaurant command based on the action."""
         if not hasattr(args, 'action') or not args.action:
-            print("Error: Please specify an action (register, list, use, or show)")
+            print("Error: Please specify an action (register, list, use, show, or edit)")
             return False
 
         if args.action == 'register':
@@ -50,8 +58,104 @@ class RestaurantCommand(Command):
             return self.use_restaurant(args)
         elif args.action == 'show':
             return self.show_restaurant(args)
+        elif args.action == 'edit':
+            return self.edit_restaurant(args)
         else:
             print(f"Error: Unknown action '{args.action}'")
+            return False
+
+    def edit_restaurant(self, args):
+        """Edit details of an existing restaurant.
+
+        Args:
+            args: Command arguments with restaurant ID and fields to update
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        restaurant_id = args.id
+
+        # Get the current restaurant data
+        restaurant_data = self._get_restaurant_by_id(restaurant_id)
+        if not restaurant_data:
+            print(f"[Error] Restaurant with ID '{restaurant_id}' not found.")
+            return False
+
+        # Create Restaurant model from existing data
+        restaurant = Restaurant.from_dict(restaurant_data)
+
+        # Track whether any fields were updated
+        updated = False
+
+        # Update only fields that are explicitly provided
+        if hasattr(args, 'name') and args.name is not None:
+            restaurant.name = args.name
+            updated = True
+
+        if hasattr(args, 'cuisine') and args.cuisine is not None:
+            restaurant.cuisine = args.cuisine
+            updated = True
+
+        if hasattr(args, 'location') and args.location is not None:
+            restaurant.location = args.location
+            updated = True
+
+        if hasattr(args, 'contact') and args.contact is not None:
+            restaurant.contact = args.contact
+            updated = True
+
+        # If no fields were updated, inform the user
+        if not updated:
+            print("No fields were provided for update. Restaurant remains unchanged.")
+            return True
+
+        # Update the restaurant in the registry
+        if self._update_restaurant_in_registry(restaurant):
+            print(f"[Success] Updated restaurant: {restaurant_id}")
+            return True
+        else:
+            print(f"Error: Failed to update restaurant '{restaurant_id}'")
+            return False
+
+    def _update_restaurant_in_registry(self, restaurant):
+        """Update a restaurant in the registry.
+
+        Args:
+            restaurant (Restaurant): Restaurant model to update
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        restaurants_file = Path("data/restaurants.json")
+
+        if not restaurants_file.exists():
+            return False
+
+        try:
+            # Read the current registry
+            with open(restaurants_file, 'r') as f:
+                restaurants = json.load(f)
+
+            # Find the restaurant to update
+            found = False
+            for i, rest in enumerate(restaurants):
+                if rest.get('id') == restaurant.id:
+                    # Update the restaurant with new data
+                    restaurants[i] = restaurant.to_dict()
+                    found = True
+                    break
+
+            if not found:
+                return False
+
+            # Write back to the registry
+            with open(restaurants_file, 'w') as f:
+                json.dump(restaurants, f, indent=2)
+
+            return True
+
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error accessing restaurant registry: {e}")
             return False
 
     def show_restaurant(self, args):
