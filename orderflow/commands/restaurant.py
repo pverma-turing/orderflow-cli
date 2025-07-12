@@ -221,9 +221,9 @@ class RestaurantCommand(Command):
 
     def register_restaurant(self, args):
         """Register a new restaurant."""
-        # Ensure the restaurant ID is unique
-        if not self._validate_unique_id(args.id):
-            print(f"Error: Restaurant with ID '{args.id}' already exists")
+        # Check if restaurant ID already exists
+        if self._restaurant_exists(args.id):
+            print(f"[Error] Restaurant with ID '{args.id}' already exists.")
             return False
 
         # Create restaurant model and convert to dict
@@ -247,6 +247,32 @@ class RestaurantCommand(Command):
 
         print(f"Successfully registered restaurant: {args.name} (ID: {args.id})")
         return True
+
+    def _restaurant_exists(self, restaurant_id):
+        """Check if a restaurant with the given ID already exists.
+
+        Args:
+            restaurant_id (str): Restaurant ID to check
+
+        Returns:
+            bool: True if restaurant exists, False otherwise
+        """
+        restaurants_file = Path("data/restaurants.json")
+
+        # If restaurants.json doesn't exist, no restaurants exist
+        if not restaurants_file.exists():
+            return False
+
+        try:
+            with open(restaurants_file, 'r') as f:
+                restaurants = json.load(f)
+
+            # Check if any restaurant has the given ID
+            return any(restaurant.get('id') == restaurant_id for restaurant in restaurants)
+        except (json.JSONDecodeError, IOError):
+            # If there's an error reading the file, assume no restaurants exist
+            # (We'll create a new file when registering)
+            return False
 
     def use_restaurant(self, args):
         """Set the active restaurant context.
@@ -301,21 +327,7 @@ class RestaurantCommand(Command):
         Returns:
             bool: True if restaurant exists, False otherwise
         """
-        restaurants_file = Path("data/restaurants.json")
-
-        # If the registry doesn't exist, restaurant can't exist
-        if not restaurants_file.exists():
-            return False
-
-        try:
-            with open(restaurants_file, 'r') as f:
-                restaurants = json.load(f)
-
-            # Check if any restaurant has the matching ID
-            return any(restaurant['id'] == restaurant_id for restaurant in restaurants)
-        except (json.JSONDecodeError, IOError, KeyError):
-            # If there's any error reading the file or accessing data, assume restaurant doesn't exist
-            return False
+        return self._restaurant_exists(restaurant_id)
 
     def list_restaurants(self):
         """List all registered restaurants."""
