@@ -1,3 +1,4 @@
+import csv
 import os
 import json
 from pathlib import Path
@@ -33,6 +34,7 @@ class RestaurantCommand(Command):
         list_parser.add_argument('--search', help='Filter restaurants by name (case-insensitive)')
         list_parser.add_argument('--cuisine', help='Filter restaurants by cuisine (case-insensitive)')
         list_parser.add_argument('--sort-by', help='Sort results by field (name, location, cuisine)')
+        list_parser.add_argument('--export', metavar='FILENAME', help='Export results to a CSV file')
 
         # Other subparsers remain the same
         use_parser = restaurant_subparsers.add_parser('use', help='Set the active restaurant context')
@@ -334,10 +336,10 @@ class RestaurantCommand(Command):
         return self._restaurant_exists(restaurant_id)
 
     def list_restaurants(self, args=None):
-        """List all restaurants, optionally filtered and sorted.
+        """List all restaurants, optionally filtered, sorted, and exported.
 
         Args:
-            args: Command arguments, may include search, cuisine, and sort-by parameters
+            args: Command arguments, may include search, cuisine, sort-by, and export parameters
 
         Returns:
             bool: True if successful, False otherwise
@@ -401,11 +403,34 @@ class RestaurantCommand(Command):
                 key=lambda r: r.get(sort_field, '').lower()  # Case-insensitive sort
             )
 
+        # Convert to Restaurant models for consistent handling
+        restaurant_models = [Restaurant.from_dict(r) for r in filtered_restaurants]
+
+        # Check if export is requested
+        export_requested = args and hasattr(args, 'export') and args.export
+        if export_requested:
+            success = self._export_restaurants_to_csv(restaurant_models, args.export)
+            if not success:
+                # Error message already printed by the export method
+                return False
+
+        # Prepare and display table data
+        self._display_restaurants_table(restaurant_models)
+
+        return True
+
+    def _display_restaurants_table(self, restaurant_models):
+        """Display the list of restaurants as a formatted table.
+
+        Args:
+            restaurant_models (list): List of Restaurant objects to display
+        """
+        if not restaurant_models:
+            return  # Nothing to display
+
         # Prepare table data
         table_data = []
-        for restaurant in filtered_restaurants:
-            # Convert to Restaurant model to ensure consistent data access
-            r = Restaurant.from_dict(restaurant)
+        for r in restaurant_models:
             table_data.append([
                 r.id,
                 r.name,
@@ -417,7 +442,51 @@ class RestaurantCommand(Command):
         headers = ['ID', 'Name', 'Cuisine', 'Location']
         print(tabulate(table_data, headers=headers, tablefmt='pretty'))
 
-        return True
+    def _export_restaurants_to_csv(self, restaurant_models, filename):
+        """Export the list of restaurants to a CSV file.
+
+        Args:
+            restaurant_models (list): List of Restaurant objects to export
+            filename (str): Path to save the CSV file
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Ensure directory exists
+            output_path = Path(filename)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write to CSV
+            with open(output_path, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+
+                # Write header
+                writer.writerow(['ID', 'Name', 'Location', 'Cuisine', 'Contact'])
+
+                # Write data rows
+                for r in restaurant_models:
+                    writer.writerow([
+                        r.id,
+                        r.name,
+                        r.location or '',  # Handle None values
+                        r.cuisine or '',
+                        r.contact or ''
+                    ])
+
+            print(f"[Success] Exported {len(restaurant_models)} restaurants to {filename}")
+            return True
+
+        except IOError as e:
+            print(f"[Error] Could not export to {filename}")
+            # Optionally, log the detailed error for debugging
+            # print(f"Reason: {e}")
+            return False
+        except Exception as e:
+            print(f"[Error] Could not export to {filename}")
+            # Optionally, log the detailed error for debugging
+            # print(f"Reason: {e}")
+            return False
 
     def _load_restaurants(self):
         """Load restaurants from restaurants.json.
