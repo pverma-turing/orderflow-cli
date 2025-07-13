@@ -9,7 +9,6 @@ def main():
     """Main entry point for the application"""
     # Initialize storage
     restaurant_id = get_active_restaurant_id()
-    print(restaurant_id)
     storage = JsonStorage(restaurant_id)
 
     # Create parser
