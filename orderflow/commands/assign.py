@@ -30,6 +30,12 @@ class AssignCommand(Command):
             print(f"Error: Order with ID {args.id} not found.")
             return
 
+        # Check if the order is already assigned
+        if order.delivery_info:
+            print(f"Order {args.id} is already assigned to {order.delivery_info.partner_name} "
+                  f"with ETA {order.delivery_info.eta}")
+            return
+
         # Create and assign DeliveryInfo
         delivery_info = DeliveryInfo(
             partner_name=args.partner_name,
