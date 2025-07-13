@@ -1,4 +1,5 @@
 from orderflow.commands.base import Command
+from orderflow.models.delivery_info import DeliveryInfo
 
 
 class AssignCommand(Command):
@@ -18,21 +19,28 @@ class AssignCommand(Command):
 
     def execute(self, args):
         """Execute the assign command"""
+        # Get the storage instance
+        storage = self.storage
 
         # Try to load the order
-        order = self.storage.get_order(args.id)
+        order = storage.get_order(args.id)
 
         # Validate that the order exists
         if not order:
             print(f"Error: Order with ID {args.id} not found.")
             return
 
+        # Create and assign DeliveryInfo
+        delivery_info = DeliveryInfo(
+            partner_name=args.partner_name,
+            eta=args.eta
+        )
+
         # Update the order with delivery partner info
-        order.delivery_partner = args.partner_name
-        order.eta = args.eta
+        order.delivery_info = delivery_info
 
         # Save the updated order
-        self.storage.save_order(order)
+        storage.save_order(order)
 
         # Show confirmation message
         print(f"Order {args.id} assigned to {args.partner_name} (ETA: {args.eta})")

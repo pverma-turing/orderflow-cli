@@ -2,6 +2,8 @@ import uuid
 import re
 from datetime import datetime
 
+from orderflow.models.delivery_info import DeliveryInfo
+
 
 class Order:
     """Represents a food order in the system with dish quantities"""
@@ -10,11 +12,14 @@ class Order:
     DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
     def __init__(self, customer_name, dishes, order_total, status="new",
-                 order_id=None, order_time=None, tags=None, notes=None, status_history=None):
+                 order_id=None, order_time=None, tags=None, notes=None, status_history=None,
+                 delivery_info=None):
         # Validate customer name
         if not customer_name or not customer_name.strip():
             raise ValueError("Customer name cannot be empty")
         self.customer_name = customer_name.strip()
+
+        self.delivery_info = delivery_info
 
         # Process dishes (now supporting quantities)
         self.dishes = self._parse_dishes(dishes)
@@ -216,7 +221,8 @@ class Order:
             'order_time': self.order_time,
             'tags': ','.join(self.tags) if self.tags else "",
             'notes': self.notes,
-            'status_history': self.status_history
+            'status_history': self.status_history,
+            'delivery_info': self.delivery_info.to_dict() if self.delivery_info else {}
         }
 
     @classmethod
@@ -252,6 +258,19 @@ class Order:
             # Default to current time if missing
             order_time = datetime.now().isoformat()
 
+        # Handle delivery_info field
+        delivery_info = None
+        if 'delivery_info' in data and data['delivery_info']:
+            delivery_info = DeliveryInfo.from_dict(data['delivery_info'])
+
+        # Handle backward compatibility with old delivery_partner and eta fields
+        # This is temporary to support transition and can be removed later
+        elif 'delivery_partner' in data and 'eta' in data:
+            delivery_info = DeliveryInfo(
+                partner_name=data.get('delivery_partner', ''),
+                eta=data.get('eta', '')
+            )
+
         # Create with validation
         return cls(
             customer_name=data['customer_name'],
@@ -262,7 +281,8 @@ class Order:
             order_time=order_time,
             tags=tags,
             notes=notes,
-            status_history=data.get("status_history", [(data["order_time"], data["status"])])
+            status_history=data.get("status_history", [(data["order_time"], data["status"])]),
+            delivery_info=delivery_info
         )
 
     def are_dishes_equal(self, other_order, exact_match=True):
