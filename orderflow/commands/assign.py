@@ -1,9 +1,17 @@
+import re
+import iso8601
 from orderflow.commands.base import Command
 from orderflow.models.delivery_info import DeliveryInfo
 
 
 class AssignCommand(Command):
     """Command to assign an order to a delivery partner"""
+
+    # Mock delivery partner registry
+    VALID_PARTNERS = ["Ravi", "Meena", "Ali", "Kavita"]
+
+    # ETA format regex pattern for relative time (e.g., 30m, 2h, 1h30m)
+    ETA_RELATIVE_PATTERN = re.compile(r'^((\d+)h)?((\d+)m)?$')
 
     def __init__(self, storage):
         self.storage = storage
@@ -26,15 +34,31 @@ class AssignCommand(Command):
 
         # Make ETA required only when --partner-name is specified
         parser.add_argument("--eta", type=str,
-                            help="Expected delivery time (e.g., 17:30)")
+                            help="Expected delivery time (e.g., '30m', '2h', '1h30m', or ISO format)")
+
+    def _validate_eta_format(self, eta_str):
+        """
+        Validate ETA format. Accepts:
+        - Relative time (e.g., 30m, 2h, 1h30m)
+        - ISO format (e.g., 2025-07-10T15:30:00)
+
+        Returns:
+            bool: True if format is valid, False otherwise
+        """
+        # Check for relative time format
+        relative_match = self.ETA_RELATIVE_PATTERN.match(eta_str)
+        if relative_match and (relative_match.group(2) or relative_match.group(4)):
+            return True
+
+        # Check for ISO format
+        try:
+            iso8601.parse_date(eta_str)
+            return True
+        except (ValueError, iso8601.ParseError):
+            return False
 
     def execute(self, args):
         """Execute the assign command"""
-        # Validate that eta is provided when partner_name is given
-        if args.partner_name and not args.eta:
-            print("Error: --eta is required when assigning an order.")
-            return
-
         # Get the storage instance
         storage = self.storage
 
@@ -62,13 +86,31 @@ class AssignCommand(Command):
             print(f"Order {args.id} has been unassigned.")
             return
 
-        # Assignment logic (only reached if --unassign is not used)
-        # Check if the order is already assigned
+        # Assignment validation
+
+        # 1. Validate that eta is provided when partner_name is given
+        if not args.eta:
+            print("Error: --eta is required when assigning an order.")
+            return
+
+        # 2. Validate the ETA format
+        if not self._validate_eta_format(args.eta):
+            print(
+                f"Error: Invalid ETA format '{args.eta}'. Use either a relative time (e.g., '30m', '2h', '1h30m') or ISO format (e.g., '2025-07-10T15:30:00').")
+            return
+
+        # 3. Validate the partner name
+        if args.partner_name not in self.VALID_PARTNERS:
+            print(f"Error: Delivery partner '{args.partner_name}' is not registered.")
+            return
+
+        # 4. Check if the order is already assigned
         if order.delivery_info:
             print(f"Order {args.id} is already assigned to {order.delivery_info.partner_name} "
                   f"with ETA {order.delivery_info.eta}")
             return
 
+        # All validations passed, proceed with assignment
         # Create and assign DeliveryInfo
         delivery_info = DeliveryInfo(
             partner_name=args.partner_name,
