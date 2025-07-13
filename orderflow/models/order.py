@@ -13,13 +13,14 @@ class Order:
 
     def __init__(self, customer_name, dishes, order_total, status="new",
                  order_id=None, order_time=None, tags=None, notes=None, status_history=None,
-                 delivery_info=None):
+                 delivery_info=None, assignment_history=None):
         # Validate customer name
         if not customer_name or not customer_name.strip():
             raise ValueError("Customer name cannot be empty")
         self.customer_name = customer_name.strip()
 
         self.delivery_info = delivery_info
+        self.assignment_history = assignment_history or []
 
         # Process dishes (now supporting quantities)
         self.dishes = self._parse_dishes(dishes)
@@ -222,7 +223,8 @@ class Order:
             'tags': ','.join(self.tags) if self.tags else "",
             'notes': self.notes,
             'status_history': self.status_history,
-            'delivery_info': self.delivery_info.to_dict() if self.delivery_info else {}
+            'delivery_info': self.delivery_info.to_dict() if self.delivery_info else {},
+            'assignment_history': self.assignment_history
         }
 
     @classmethod
@@ -282,7 +284,8 @@ class Order:
             tags=tags,
             notes=notes,
             status_history=data.get("status_history", [(data["order_time"], data["status"])]),
-            delivery_info=delivery_info
+            delivery_info=delivery_info,
+            assignment_history=data.get('assignment_history', [])
         )
 
     def are_dishes_equal(self, other_order, exact_match=True):
