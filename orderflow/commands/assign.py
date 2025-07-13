@@ -7,14 +7,14 @@ from orderflow.models.delivery_info import DeliveryInfo
 class AssignCommand(Command):
     """Command to assign an order to a delivery partner"""
 
+    def __init__(self, storage):
+        self.storage = storage
+
     # Mock delivery partner registry
     VALID_PARTNERS = ["Ravi", "Meena", "Ali", "Kavita"]
 
     # ETA format regex pattern for relative time (e.g., 30m, 2h, 1h30m)
     ETA_RELATIVE_PATTERN = re.compile(r'^((\d+)h)?((\d+)m)?$')
-
-    def __init__(self, storage):
-        self.storage = storage
 
     def add_arguments(self, parser):
         """Add command-specific arguments"""
@@ -35,6 +35,10 @@ class AssignCommand(Command):
         # Make ETA required only when --partner-name is specified
         parser.add_argument("--eta", type=str,
                             help="Expected delivery time (e.g., '30m', '2h', '1h30m', or ISO format)")
+
+        # Add reassign flag
+        parser.add_argument("--reassign", action="store_true",
+                            help="Reassign an already assigned order to a different delivery partner")
 
     def _validate_eta_format(self, eta_str):
         """
@@ -106,12 +110,18 @@ class AssignCommand(Command):
 
         # 4. Check if the order is already assigned
         if order.delivery_info:
-            print(f"Order {args.id} is already assigned to {order.delivery_info.partner_name} "
-                  f"with ETA {order.delivery_info.eta}")
-            return
+            # If already assigned and --reassign flag is not provided, show error
+            if not args.reassign:
+                print(
+                    f"Order {args.id} is already assigned to {order.delivery_info.partner_name} with ETA {order.delivery_info.eta}. Use --reassign to override.")
+                return
+
+            # Get the previous assignment for summary message
+            previous_partner = order.delivery_info.partner_name
+            previous_eta = order.delivery_info.eta
 
         # All validations passed, proceed with assignment
-        # Create and assign DeliveryInfo
+        # Create DeliveryInfo object
         delivery_info = DeliveryInfo(
             partner_name=args.partner_name,
             eta=args.eta
@@ -124,4 +134,8 @@ class AssignCommand(Command):
         storage.save_order(order)
 
         # Show confirmation message
-        print(f"Order {args.id} assigned to {args.partner_name} (ETA: {args.eta})")
+        if args.reassign and 'previous_partner' in locals():
+            print(
+                f"Order {args.id} reassigned from {previous_partner} (ETA: {previous_eta}) to {args.partner_name} (ETA: {args.eta})")
+        else:
+            print(f"Order {args.id} assigned to {args.partner_name} (ETA: {args.eta})")
