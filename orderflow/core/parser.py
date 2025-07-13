@@ -3,6 +3,7 @@ from orderflow.commands.add import AddCommand
 from orderflow.commands.assign import AssignCommand
 from orderflow.commands.delete import DeleteCommand
 from orderflow.commands.export import ExportCommand
+from orderflow.commands.menu import MenuCommand
 from orderflow.commands.restaurant import RestaurantCommand
 from orderflow.commands.status_history import StatusHistoryCommand
 from orderflow.commands.update import UpdateCommand
@@ -137,6 +138,11 @@ For detailed help on a specific command, use:
     assign_command = AssignCommand(storage)
     assign_command.add_arguments(assign_parser)
     assign_parser.set_defaults(func=assign_command.execute)
+
+    menu_parser = subparsers.add_parser('menu', help='Manage restaurant menu')
+    menu_cmd = MenuCommand(storage)
+    menu_cmd.add_arguments(menu_parser)
+    menu_parser.set_defaults(func=menu_cmd.execute)
 
 
     return parser
