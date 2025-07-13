@@ -144,6 +144,9 @@ class ViewCommand(Command):
         report_group.add_argument("--multi-dish-ratio", action="store_true",
                             help="Show the ratio of orders with multiple dishes vs. single dish orders")
 
+        report_group.add_argument("--partner-summary", action="store_true",
+                            help="Show summary of orders assigned to each delivery partner")
+
         # Pagination options
         pagination_group = parser.add_argument_group('Pagination')
         pagination_group.add_argument(
@@ -262,6 +265,10 @@ Examples:
 
             if args.multi_dish_ratio:
                 self._display_multi_dish_ratio(filtered_orders, "")
+
+            if args.partner_summary:
+                self._show_partner_summary(filtered_orders)
+                return
 
             # Display orders table if we have orders and not only showing summary reports
             if not filtered_orders:
@@ -1272,3 +1279,27 @@ Examples:
         # Use the same tabulate formatting as other outputs
         use_grid = self._should_use_grid_format()
         print(tabulate(table_data, tablefmt="grid" if use_grid else "simple"))
+
+    def _show_partner_summary(self, orders):
+        """Display a summary of orders assigned to each delivery partner"""
+        # Filter orders with delivery information
+        assigned_orders = [order for order in orders if hasattr(order, 'delivery_info') and order.delivery_info]
+
+        # Count orders per delivery partner
+        partner_counts = Counter()
+        for order in assigned_orders:
+            partner_counts[order.delivery_info.partner_name] += 1
+
+        # Prepare data for tabulation
+        if not partner_counts:
+            print("No orders with assigned delivery partners found in the filtered results.")
+            return
+
+        # Sort partners by count (descending)
+        table_data = [(partner, count) for partner, count in partner_counts.most_common()]
+
+        # Display the table
+        headers = ["Partner Name", "Assigned Orders Count"]
+        print("\nDelivery Partner Assignment Summary:\n")
+        print(tabulate(table_data, headers=headers, tablefmt="grid"))
+        print(f"\nTotal: {len(assigned_orders)} orders assigned across {len(partner_counts)} delivery partners")
