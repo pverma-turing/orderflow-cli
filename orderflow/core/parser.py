@@ -1,5 +1,6 @@
 import argparse
 from orderflow.commands.add import AddCommand
+from orderflow.commands.assign import AssignCommand
 from orderflow.commands.delete import DeleteCommand
 from orderflow.commands.export import ExportCommand
 from orderflow.commands.restaurant import RestaurantCommand
@@ -125,6 +126,17 @@ For detailed help on a specific command, use:
     restaurant_command = RestaurantCommand(storage)
     restaurant_command.add_arguments(restaurant_parser)
     restaurant_parser.set_defaults(func=restaurant_command.execute)
+
+    # Assign command
+    assign_parser = subparsers.add_parser(
+        'assign',
+        help='Assign delivery person for order',
+        description='Assign order to delivery personal',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    assign_command = AssignCommand(storage)
+    assign_command.add_arguments(assign_parser)
+    assign_parser.set_defaults(func=assign_command.execute)
 
 
     return parser
