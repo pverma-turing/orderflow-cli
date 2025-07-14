@@ -12,6 +12,7 @@ class MenuCommand(Command):
 
     def __init__(self, storage):
         # In-memory storage for menu items
+        self.current_restaurant = None
         self.storage = storage
         self.menu_items = {}
 
@@ -50,6 +51,10 @@ class MenuCommand(Command):
         list_parser = subparsers.add_parser('list', help='List all dishes on the menu')
         list_parser.add_argument('--json', action='store_true', help='Output menu as JSON')
 
+        # Search menu subcommand
+        search_parser = subparsers.add_parser('search', help='Search for dishes in the menu')
+        search_parser.add_argument('--query', required=True, help='Search string for dish names')
+
     def execute(self, args):
         """Execute the menu command based on subcommand."""
         self.current_restaurant = args.restaurant
@@ -64,7 +69,7 @@ class MenuCommand(Command):
         self._load_menu()
 
         if not hasattr(args, 'menu_action') or args.menu_action is None:
-            print("Error: Please specify a menu action (add, remove, update, list)")
+            print("Error: Please specify a menu action (add, remove, update, list, search)")
             return
 
         if args.menu_action == 'add':
@@ -75,6 +80,8 @@ class MenuCommand(Command):
             self._update_dish(args)
         elif args.menu_action == 'list':
             self._list_menu(args)
+        elif args.menu_action == 'search':
+            self._search_menu(args)
 
     def _load_menu(self):
         """Load menu from the restaurant's menu file."""
@@ -255,3 +262,40 @@ class MenuCommand(Command):
 
         print("=" * 60)
         print(f"Total Items: {len(self.menu_items)}")
+
+    def _search_menu(self, args):
+        """Search for dishes in the menu by name."""
+        query = args.query.lower()
+        matching_dishes = {}
+
+        # Find dishes with names containing the query string (case-insensitive)
+        for dish_name, details in self.menu_items.items():
+            if query in dish_name.lower():
+                matching_dishes[dish_name] = details
+
+        # No matching dishes found
+        if not matching_dishes:
+            print("No matching dishes found.")
+            return
+
+        # Display matching dishes
+        print(f"\nSearch Results for '{args.query}' in Restaurant: {self.current_restaurant}")
+        print("=" * 60)
+        print(f"{'Dish Name':<30} {'Category':<15} {'Price':>10}")
+        print("-" * 60)
+
+        # Group dishes by category for organized display
+        by_category = {}
+        for dish_name, details in matching_dishes.items():
+            category = details['category']
+            if category not in by_category:
+                by_category[category] = []
+            by_category[category].append((dish_name, details['price']))
+
+        # Display dishes sorted by category
+        for category, dishes in sorted(by_category.items()):
+            for dish_name, price in sorted(dishes):
+                print(f"{dish_name:<30} {category:<15} ₹{price:>9.2f}")
+
+        print("=" * 60)
+        print(f"Found {len(matching_dishes)} matching dishes")
