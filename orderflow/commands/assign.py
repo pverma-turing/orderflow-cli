@@ -1,3 +1,5 @@
+import datetime
+import json
 import re
 import iso8601
 from orderflow.commands.base import Command
@@ -65,6 +67,35 @@ class AssignCommand(Command):
         except (ValueError, iso8601.ParseError):
             return False
 
+    def _record_history_entry(self, order, action, partner_name=None, eta=None, dry_run=False):
+        """Record an entry in the order's assignment history"""
+        timestamp = datetime.datetime.now().isoformat()
+
+        history_entry = {
+            "action": action,
+            "timestamp": timestamp
+        }
+
+        # Add partner and ETA info based on action type
+        if action == "assign" or action == "reassign":
+            history_entry["partner_name"] = partner_name
+            history_entry["eta"] = eta
+        elif action == "unassign" and partner_name:
+            history_entry["removed_partner"] = partner_name
+
+        if dry_run:
+            print(f"DRY RUN: Would record in history: {json.dumps(history_entry)}")
+            return
+
+        # Initialize assignment_history if it doesn't exist
+        if not hasattr(order, 'assignment_history') or order.assignment_history is None:
+            order.assignment_history = []
+
+        # Add the history entry
+        order.assignment_history.append(history_entry)
+
+        print("Assignment recorded in order history.")
+
     def execute(self, args):
         """Execute the assign command"""
         # Get the storage instance
@@ -91,11 +122,21 @@ class AssignCommand(Command):
                 print(f"Order {args.id} is not currently assigned.")
                 return
 
-            # Clear the delivery info
-            order.delivery_info = None
+            # Get the current partner name before unassigning
+            removed_partner = order.delivery_info.partner_name
 
-            # Save the updated order
-            storage.save_order(order)
+            if args.dry_run:
+                print(f"DRY RUN: Would unassign order {args.id} from {removed_partner}")
+                self._record_history_entry(order, "unassign", partner_name=removed_partner, dry_run=True)
+            else:
+                # Clear the delivery info
+                order.delivery_info = None
+
+                # Record unassignment in history
+                self._record_history_entry(order, "unassign", partner_name=removed_partner)
+
+                # Save the updated order
+                storage.save_order(order)
 
             # Show confirmation message
             if args.dry_run:
@@ -135,6 +176,10 @@ class AssignCommand(Command):
             print(f"DRY RUN: Partner '{args.partner_name}' validation passed")
 
         # 4. Check if the order is already assigned
+        previous_partner = None
+        previous_eta = None
+        is_reassign = False
+
         if order.delivery_info:
             # If already assigned and --reassign flag is not provided, show error
             if not args.reassign:
@@ -142,12 +187,33 @@ class AssignCommand(Command):
                     f"Order {args.id} is already assigned to {order.delivery_info.partner_name} with ETA {order.delivery_info.eta}. Use --reassign to override.")
                 return
 
-            # Get the previous assignment for summary message
+            # Store the previous assignment info for the summary message
             previous_partner = order.delivery_info.partner_name
             previous_eta = order.delivery_info.eta
+            is_reassign = True
+
+            if args.dry_run:
+                print(f"DRY RUN: Order is already assigned to {previous_partner} with ETA {previous_eta}")
+                print(f"DRY RUN: Reassignment mode is active")
 
         # All validations passed, proceed with assignment
-        # Create DeliveryInfo object
+        action_type = "reassign" if is_reassign else "assign"
+
+        if args.dry_run:
+            print(f"DRY RUN: Would create DeliveryInfo with partner_name={args.partner_name}, eta={args.eta}")
+            self._record_history_entry(order, action_type, args.partner_name, args.eta, dry_run=True)
+
+            # Show what message would be shown
+            if is_reassign:
+                print(
+                    f"DRY RUN: Would print: Order {args.id} reassigned from {previous_partner} (ETA: {previous_eta}) to {args.partner_name} (ETA: {args.eta})")
+            else:
+                print(f"DRY RUN: Would print: Order {args.id} assigned to {args.partner_name} (ETA: {args.eta})")
+
+            print("Dry run complete. No changes were made.")
+            return
+
+        # Create DeliveryInfo object (only if not dry run)
         delivery_info = DeliveryInfo(
             partner_name=args.partner_name,
             eta=args.eta
@@ -156,11 +222,14 @@ class AssignCommand(Command):
         # Update the order with delivery partner info
         order.delivery_info = delivery_info
 
+        # Record assignment or reassignment in history
+        self._record_history_entry(order, action_type, args.partner_name, args.eta)
+
         # Save the updated order
         storage.save_order(order)
 
         # Show confirmation message
-        if args.reassign and 'previous_partner' in locals():
+        if is_reassign:
             print(
                 f"Order {args.id} reassigned from {previous_partner} (ETA: {previous_eta}) to {args.partner_name} (ETA: {args.eta})")
         else:
