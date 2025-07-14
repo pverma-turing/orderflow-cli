@@ -58,6 +58,11 @@ class MenuCommand(Command):
             '--category',
             help=f'Filter by category (allowed values: {", ".join(self.VALID_CATEGORIES)})'
         )
+        search_parser.add_argument(
+            '--limit',
+            type=int,
+            help='Maximum number of results to display'
+        )
 
     def execute(self, args):
         """Execute the menu command based on subcommand."""
@@ -268,9 +273,15 @@ class MenuCommand(Command):
         print(f"Total Items: {len(self.menu_items)}")
 
     def _search_menu(self, args):
-        """Search for dishes in the menu by name and optionally by category."""
+        """Search for dishes in the menu by name and optionally by category, with optional result limit."""
         query = args.query.lower()
         category_filter = args.category.lower() if hasattr(args, 'category') and args.category else None
+        limit = args.limit if hasattr(args, 'limit') and args.limit is not None else None
+
+        # Validate limit if provided
+        if limit is not None and limit <= 0:
+            print("Error: Limit must be a positive integer.")
+            return
 
         # Validate category if provided
         if category_filter and category_filter.lower() not in [c.lower() for c in self.VALID_CATEGORIES]:
@@ -316,10 +327,26 @@ class MenuCommand(Command):
                 by_category[category] = []
             by_category[category].append((dish_name, details['price']))
 
-        # Display dishes sorted by category
+        # Display dishes sorted by category with limit
+        displayed_count = 0
+
         for category, dishes in sorted(by_category.items()):
             for dish_name, price in sorted(dishes):
+                # Check if we've reached the limit
+                if limit is not None and displayed_count >= limit:
+                    break
+
                 print(f"{dish_name:<30} {category:<15} ₹{price:>9.2f}")
+                displayed_count += 1
+
+            # If we've reached the limit, break out of the category loop as well
+            if limit is not None and displayed_count >= limit:
+                break
 
         print("=" * 60)
-        print(f"Found {len(matching_dishes)} matching dishes")
+
+        # Show result count, noting if limited
+        if limit is not None and len(matching_dishes) > limit:
+            print(f"Found {len(matching_dishes)} matching dishes (showing first {limit})")
+        else:
+            print(f"Found {len(matching_dishes)} matching dishes")
