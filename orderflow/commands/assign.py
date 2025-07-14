@@ -40,6 +40,10 @@ class AssignCommand(Command):
         parser.add_argument("--reassign", action="store_true",
                             help="Reassign an already assigned order to a different delivery partner")
 
+        # Add dry-run flag
+        parser.add_argument("--dry-run", action="store_true",
+                            help="Simulate the operation without making actual changes")
+
     def _validate_eta_format(self, eta_str):
         """
         Validate ETA format. Accepts:
@@ -66,6 +70,10 @@ class AssignCommand(Command):
         # Get the storage instance
         storage = self.storage
 
+        # Log dry run status if enabled
+        if args.dry_run:
+            print("DRY RUN: Simulating operation without making changes.")
+
         # Try to load the order
         order = storage.get_order(args.id)
 
@@ -73,6 +81,9 @@ class AssignCommand(Command):
         if not order:
             print(f"Error: Order with ID {args.id} not found.")
             return
+
+        if args.dry_run:
+            print(f"DRY RUN: Found order with ID {args.id}")
 
         # Unassignment logic
         if args.unassign:
@@ -87,7 +98,13 @@ class AssignCommand(Command):
             storage.save_order(order)
 
             # Show confirmation message
-            print(f"Order {args.id} has been unassigned.")
+            if args.dry_run:
+                print(f"DRY RUN: Would print: Order {args.id} has been unassigned.")
+            else:
+                print(f"Order {args.id} has been unassigned.")
+
+            if args.dry_run:
+                print("Dry run complete. No changes were made.")
             return
 
         # Assignment validation
@@ -97,16 +114,25 @@ class AssignCommand(Command):
             print("Error: --eta is required when assigning an order.")
             return
 
+        if args.dry_run:
+            print(f"DRY RUN: ETA parameter provided: {args.eta}")
+
         # 2. Validate the ETA format
         if not self._validate_eta_format(args.eta):
             print(
                 f"Error: Invalid ETA format '{args.eta}'. Use either a relative time (e.g., '30m', '2h', '1h30m') or ISO format (e.g., '2025-07-10T15:30:00').")
             return
 
+        if args.dry_run:
+            print(f"DRY RUN: ETA format validation passed for '{args.eta}'")
+
         # 3. Validate the partner name
         if args.partner_name not in self.VALID_PARTNERS:
             print(f"Error: Delivery partner '{args.partner_name}' is not registered.")
             return
+
+        if args.dry_run:
+            print(f"DRY RUN: Partner '{args.partner_name}' validation passed")
 
         # 4. Check if the order is already assigned
         if order.delivery_info:
