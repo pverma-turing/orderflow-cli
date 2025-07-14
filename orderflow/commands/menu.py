@@ -54,6 +54,10 @@ class MenuCommand(Command):
         # Search menu subcommand
         search_parser = subparsers.add_parser('search', help='Search for dishes in the menu')
         search_parser.add_argument('--query', required=True, help='Search string for dish names')
+        search_parser.add_argument(
+            '--category',
+            help=f'Filter by category (allowed values: {", ".join(self.VALID_CATEGORIES)})'
+        )
 
     def execute(self, args):
         """Execute the menu command based on subcommand."""
@@ -264,13 +268,25 @@ class MenuCommand(Command):
         print(f"Total Items: {len(self.menu_items)}")
 
     def _search_menu(self, args):
-        """Search for dishes in the menu by name."""
+        """Search for dishes in the menu by name and optionally by category."""
         query = args.query.lower()
+        category_filter = args.category.lower() if hasattr(args, 'category') and args.category else None
+
+        # Validate category if provided
+        if category_filter and category_filter.lower() not in [c.lower() for c in self.VALID_CATEGORIES]:
+            print(f"Error: Invalid category '{args.category}'. Allowed values: {', '.join(self.VALID_CATEGORIES)}")
+            return
+
         matching_dishes = {}
 
         # Find dishes with names containing the query string (case-insensitive)
         for dish_name, details in self.menu_items.items():
+            # Check if dish name matches the query
             if query in dish_name.lower():
+                # If category filter is provided, check category as well
+                if category_filter and details['category'].lower() != category_filter:
+                    continue
+
                 matching_dishes[dish_name] = details
 
         # No matching dishes found
@@ -278,8 +294,16 @@ class MenuCommand(Command):
             print("No matching dishes found.")
             return
 
+        # Build search description for header
+        search_desc = f"'{args.query}'"
+        if category_filter:
+            # Find the correctly cased category from the valid list
+            correct_case_category = next((c for c in self.VALID_CATEGORIES if c.lower() == category_filter),
+                                         args.category)
+            search_desc += f" in category '{correct_case_category}'"
+
         # Display matching dishes
-        print(f"\nSearch Results for '{args.query}' in Restaurant: {self.current_restaurant}")
+        print(f"\nSearch Results for {search_desc} in Restaurant: {self.current_restaurant}")
         print("=" * 60)
         print(f"{'Dish Name':<30} {'Category':<15} {'Price':>10}")
         print("-" * 60)
