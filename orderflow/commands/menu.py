@@ -101,9 +101,42 @@ class MenuCommand(Command):
         """Get the path to the menu file for the current restaurant."""
         return os.path.join('data', self.current_restaurant, 'menu.json')
 
+    def _validate_dish_name(self, dish_name):
+        """Validate dish name is non-empty after trimming whitespace."""
+        if dish_name is None:
+            return False
+
+        # Trim whitespace
+        trimmed_name = dish_name.strip()
+
+        # Check if it's empty after trimming
+        return len(trimmed_name) > 0
+
+    def _validate_price(self, price):
+        """Validate price is a positive number."""
+        if price is None:
+            return False
+
+        # Check if price is positive
+        return price > 0
+
     def _add_dish(self, args):
         """Add a new dish to the menu."""
         dish_name = args.dish
+        price = args.price
+
+        # Validate dish name
+        if not self._validate_dish_name(dish_name):
+            print("Error: Dish name cannot be empty.")
+            return
+
+        # Validate price
+        if not self._validate_price(price):
+            print("Error: Price must be a positive number.")
+            return
+
+        # Trim whitespace from dish name
+        dish_name = dish_name.strip()
 
         if dish_name in self.menu_items:
             print(f"Error: Dish '{dish_name}' already exists on the menu.")
@@ -111,18 +144,22 @@ class MenuCommand(Command):
 
         # Add the dish to the menu
         self.menu_items[dish_name] = {
-            'price': args.price,
+            'price': price,
             'category': args.category
         }
 
         # Save the updated menu
         self._save_menu()
 
-        print(f"Success: Added '{dish_name}' to the menu (Price: ₹{args.price}, Category: {args.category}).")
+        print(f"Success: Added '{dish_name}' to the menu (Price: ₹{price}, Category: {args.category}).")
 
     def _remove_dish(self, args):
         """Remove a dish from the menu."""
         dish_name = args.dish
+
+        # Trim whitespace from dish name
+        if dish_name:
+            dish_name = dish_name.strip()
 
         if dish_name not in self.menu_items:
             print(f"Error: Dish '{dish_name}' not found on the menu.")
@@ -140,6 +177,10 @@ class MenuCommand(Command):
         """Update a dish on the menu."""
         dish_name = args.dish
 
+        # Trim whitespace from dish name
+        if dish_name:
+            dish_name = dish_name.strip()
+
         if dish_name not in self.menu_items:
             print(f"Error: Dish '{dish_name}' not found on the menu.")
             return
@@ -150,6 +191,11 @@ class MenuCommand(Command):
 
         # Update price if specified
         if args.price is not None:
+            # Validate price
+            if not self._validate_price(args.price):
+                print("Error: Price must be a positive number.")
+                return
+
             old_price = dish['price']
             dish['price'] = args.price
             changes_made = True
