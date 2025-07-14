@@ -2,6 +2,7 @@ import argparse
 from orderflow.commands.add import AddCommand
 from orderflow.commands.delete import DeleteCommand
 from orderflow.commands.export import ExportCommand
+from orderflow.commands.restaurant import RestaurantCommand
 from orderflow.commands.status_history import StatusHistoryCommand
 from orderflow.commands.update import UpdateCommand
 from orderflow.commands.view import ViewCommand
@@ -113,5 +114,17 @@ For detailed help on a specific command, use:
     update_command = UpdateCommand(storage)
     update_command.add_arguments(update_parser)
     update_parser.set_defaults(func=update_command.execute)
+
+    # Restaurant command
+    restaurant_parser = subparsers.add_parser(
+        'restaurant',
+        help='Update order',
+        description='Update order with powerful filtering',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    restaurant_command = RestaurantCommand(storage)
+    restaurant_command.add_arguments(restaurant_parser)
+    restaurant_parser.set_defaults(func=restaurant_command.execute)
+
 
     return parser
