@@ -30,7 +30,7 @@ class MenuCommand(Command):
         add_parser.add_argument(
             '--category',
             required=True,
-            help=f'Category of the dish. Allowed values: {", ".join(sorted(self.VALID_CATEGORIES))}'
+            help=f'Category of the dish (allowed values: {", ".join(self.VALID_CATEGORIES)})'
         )
 
         # Remove dish subcommand
@@ -43,11 +43,12 @@ class MenuCommand(Command):
         update_parser.add_argument('--price', type=float, help='New price of the dish')
         update_parser.add_argument(
             '--category',
-            help=f'New category of the dish. Allowed values: {", ".join(sorted(self.VALID_CATEGORIES))}'
+            help=f'New category of the dish (allowed values: {", ".join(self.VALID_CATEGORIES)})'
         )
 
         # List menu subcommand
-        subparsers.add_parser('list', help='List all dishes on the menu')
+        list_parser = subparsers.add_parser('list', help='List all dishes on the menu')
+        list_parser.add_argument('--json', action='store_true', help='Output menu as JSON')
 
     def execute(self, args):
         """Execute the menu command based on subcommand."""
@@ -73,7 +74,7 @@ class MenuCommand(Command):
         elif args.menu_action == 'update':
             self._update_dish(args)
         elif args.menu_action == 'list':
-            self._list_menu()
+            self._list_menu(args)
 
     def _load_menu(self):
         """Load menu from the restaurant's menu file."""
@@ -112,36 +113,22 @@ class MenuCommand(Command):
         return os.path.join('data', self.current_restaurant, 'menu.json')
 
     def _validate_dish_name(self, dish_name):
-        """Validate dish name is non-empty after trimming whitespace."""
-        if dish_name is None:
+        """Validate that a dish name is non-empty after trimming whitespace."""
+        if not dish_name or not dish_name.strip():
             return False
-
-        # Trim whitespace
-        trimmed_name = dish_name.strip()
-
-        # Check if it's empty after trimming
-        return len(trimmed_name) > 0
+        return True
 
     def _validate_price(self, price):
-        """Validate price is a positive number."""
-        if price is None:
-            return False
-
-        # Check if price is positive
-        return price > 0
+        """Validate that a price is a positive number."""
+        return price is not None and price > 0
 
     def _validate_category(self, category):
-        """Validate category is one of the allowed values."""
-        if category is None:
-            return False
-
-        return category.lower() in self.VALID_CATEGORIES
+        """Validate that a category is in the list of valid categories."""
+        return category in self.VALID_CATEGORIES
 
     def _add_dish(self, args):
         """Add a new dish to the menu."""
         dish_name = args.dish
-        price = args.price
-        category = args.category
 
         # Validate dish name
         if not self._validate_dish_name(dish_name):
@@ -149,21 +136,14 @@ class MenuCommand(Command):
             return
 
         # Validate price
-        if not self._validate_price(price):
+        if not self._validate_price(args.price):
             print("Error: Price must be a positive number.")
             return
 
         # Validate category
-        if not self._validate_category(category):
-            print(
-                f"Error: Invalid category '{category}'. Allowed values are: {', '.join(sorted(self.VALID_CATEGORIES))}")
+        if not self._validate_category(args.category):
+            print(f"Error: Invalid category '{args.category}'. Allowed values: {', '.join(self.VALID_CATEGORIES)}")
             return
-
-        # Normalize category to lowercase
-        category = category.lower()
-
-        # Trim whitespace from dish name
-        dish_name = dish_name.strip()
 
         if dish_name in self.menu_items:
             print(f"Error: Dish '{dish_name}' already exists on the menu.")
@@ -171,22 +151,18 @@ class MenuCommand(Command):
 
         # Add the dish to the menu
         self.menu_items[dish_name] = {
-            'price': price,
-            'category': category
+            'price': args.price,
+            'category': args.category
         }
 
         # Save the updated menu
         self._save_menu()
 
-        print(f"Success: Added '{dish_name}' to the menu (Price: ₹{price}, Category: {category}).")
+        print(f"Success: Added '{dish_name}' to the menu (Price: ₹{args.price}, Category: {args.category}).")
 
     def _remove_dish(self, args):
         """Remove a dish from the menu."""
         dish_name = args.dish
-
-        # Trim whitespace from dish name
-        if dish_name:
-            dish_name = dish_name.strip()
 
         if dish_name not in self.menu_items:
             print(f"Error: Dish '{dish_name}' not found on the menu.")
@@ -203,10 +179,6 @@ class MenuCommand(Command):
     def _update_dish(self, args):
         """Update a dish on the menu."""
         dish_name = args.dish
-
-        # Trim whitespace from dish name
-        if dish_name:
-            dish_name = dish_name.strip()
 
         if dish_name not in self.menu_items:
             print(f"Error: Dish '{dish_name}' not found on the menu.")
@@ -232,17 +204,13 @@ class MenuCommand(Command):
         if args.category is not None:
             # Validate category
             if not self._validate_category(args.category):
-                print(
-                    f"Error: Invalid category '{args.category}'. Allowed values are: {', '.join(sorted(self.VALID_CATEGORIES))}")
+                print(f"Error: Invalid category '{args.category}'. Allowed values: {', '.join(self.VALID_CATEGORIES)}")
                 return
 
-            # Normalize category to lowercase
-            category = args.category.lower()
-
             old_category = dish['category']
-            dish['category'] = category
+            dish['category'] = args.category
             changes_made = True
-            change_details.append(f"Category: {old_category} → {category}")
+            change_details.append(f"Category: {old_category} → {args.category}")
 
         if changes_made:
             # Save the updated menu
@@ -254,8 +222,15 @@ class MenuCommand(Command):
         else:
             print(f"No changes made to '{dish_name}'.")
 
-    def _list_menu(self):
+    def _list_menu(self, args):
         """List all dishes on the menu."""
+        # Check if JSON output is requested
+        if hasattr(args, 'json') and args.json:
+            # Output as raw JSON
+            print(json.dumps(self.menu_items) if self.menu_items else "{}")
+            return
+
+        # Standard formatted output
         if not self.menu_items:
             print(f"The menu for restaurant '{self.current_restaurant}' is currently empty.")
             return
