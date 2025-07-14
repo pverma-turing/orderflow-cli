@@ -212,3 +212,111 @@ class JsonStorage(Storage):
             return saved_orders
 
         return []
+
+    def delete_order(self, order_id):
+        """
+        Delete an order from storage by its ID.
+
+        Args:
+            order_id (str): The ID of the order to delete
+
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+        try:
+            # Load all orders
+            orders = self.get_orders()
+
+            # Find order index
+            order_index = None
+            for i, order in enumerate(orders):
+                if order.order_id == order_id:
+                    order_index = i
+                    break
+
+            # If order not found, return False
+            if order_index is None:
+                return False
+
+            # Remove the order
+            orders.pop(order_index)
+
+            remaining_orders = []
+            for order in orders:
+                order_dict = order.to_dict()
+                remaining_orders.append(order_dict)
+
+
+            # Persist the change
+            self._write_all(remaining_orders)
+
+            return True
+        except Exception as e:
+            # Log the error if logging is set up
+            # self.logger.error(f"Error deleting order {order_id}: {e}")
+            return False
+
+    def find_orders_by_customer_and_time(self, customer_name, order_time):
+        """
+        Find orders by customer name and order time.
+
+        Args:
+            customer_name (str): The name of the customer
+            order_time (str): The time of the order
+
+        Returns:
+            list: List of Order objects that match both criteria
+        """
+        try:
+            # Load all orders
+            all_orders = self.get_orders()
+
+            # Filter orders by customer name and order time
+            matching_orders = []
+            for order in all_orders:
+                # Compare customer name (case-insensitive)
+                name_matches = order.customer_name.lower() == customer_name.lower()
+
+                # Compare order time, allowing for flexible matching
+                # This handles different time formats and partial matches
+                time_matches = order_time in order.order_time
+
+                if name_matches and time_matches:
+                    matching_orders.append(order)
+
+            return matching_orders
+
+        except Exception as e:
+            # Log the error if logging is set up
+            # self.logger.error(f"Error finding orders by customer and time: {e}")
+            return []
+
+    def find_orders_by_tag(self, tag):
+        """
+        Find all orders that have a specific tag.
+
+        Args:
+            tag (str): The tag to search for
+
+        Returns:
+            list: List of Order objects that have the specified tag
+        """
+        try:
+            # Load all orders
+            all_orders = self.get_orders()
+
+            # Filter orders by tag (case-insensitive)
+            matching_orders = []
+            for order in all_orders:
+                # Check if the order has tags
+                if hasattr(order, 'tags') and order.tags:
+                    # Compare tag (case-insensitive)
+                    if any(t.lower() == tag.lower() for t in order.tags):
+                        matching_orders.append(order)
+
+            return matching_orders
+
+        except Exception as e:
+            # Log the error if logging is set up
+            # self.logger.error(f"Error finding orders by tag: {e}")
+            return []
