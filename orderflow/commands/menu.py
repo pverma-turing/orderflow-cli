@@ -7,6 +7,9 @@ from orderflow.commands.base import Command
 class MenuCommand(Command):
     """Command class for managing restaurant menus."""
 
+    # Define valid categories
+    VALID_CATEGORIES = {'starter', 'main', 'dessert', 'beverage'}
+
     def __init__(self, storage):
         # In-memory storage for menu items
         self.storage = storage
@@ -24,7 +27,11 @@ class MenuCommand(Command):
         add_parser = subparsers.add_parser('add', help='Add a new dish to the menu')
         add_parser.add_argument('--dish', required=True, help='Name of the dish')
         add_parser.add_argument('--price', required=True, type=float, help='Price of the dish')
-        add_parser.add_argument('--category', required=True, help='Category of the dish (e.g., starter, main, dessert)')
+        add_parser.add_argument(
+            '--category',
+            required=True,
+            help=f'Category of the dish. Allowed values: {", ".join(sorted(self.VALID_CATEGORIES))}'
+        )
 
         # Remove dish subcommand
         remove_parser = subparsers.add_parser('remove', help='Remove a dish from the menu')
@@ -34,7 +41,10 @@ class MenuCommand(Command):
         update_parser = subparsers.add_parser('update', help='Update a dish on the menu')
         update_parser.add_argument('--dish', required=True, help='Name of the dish to update')
         update_parser.add_argument('--price', type=float, help='New price of the dish')
-        update_parser.add_argument('--category', help='New category of the dish')
+        update_parser.add_argument(
+            '--category',
+            help=f'New category of the dish. Allowed values: {", ".join(sorted(self.VALID_CATEGORIES))}'
+        )
 
         # List menu subcommand
         subparsers.add_parser('list', help='List all dishes on the menu')
@@ -120,10 +130,18 @@ class MenuCommand(Command):
         # Check if price is positive
         return price > 0
 
+    def _validate_category(self, category):
+        """Validate category is one of the allowed values."""
+        if category is None:
+            return False
+
+        return category.lower() in self.VALID_CATEGORIES
+
     def _add_dish(self, args):
         """Add a new dish to the menu."""
         dish_name = args.dish
         price = args.price
+        category = args.category
 
         # Validate dish name
         if not self._validate_dish_name(dish_name):
@@ -135,6 +153,15 @@ class MenuCommand(Command):
             print("Error: Price must be a positive number.")
             return
 
+        # Validate category
+        if not self._validate_category(category):
+            print(
+                f"Error: Invalid category '{category}'. Allowed values are: {', '.join(sorted(self.VALID_CATEGORIES))}")
+            return
+
+        # Normalize category to lowercase
+        category = category.lower()
+
         # Trim whitespace from dish name
         dish_name = dish_name.strip()
 
@@ -145,13 +172,13 @@ class MenuCommand(Command):
         # Add the dish to the menu
         self.menu_items[dish_name] = {
             'price': price,
-            'category': args.category
+            'category': category
         }
 
         # Save the updated menu
         self._save_menu()
 
-        print(f"Success: Added '{dish_name}' to the menu (Price: ₹{price}, Category: {args.category}).")
+        print(f"Success: Added '{dish_name}' to the menu (Price: ₹{price}, Category: {category}).")
 
     def _remove_dish(self, args):
         """Remove a dish from the menu."""
@@ -203,10 +230,19 @@ class MenuCommand(Command):
 
         # Update category if specified
         if args.category is not None:
+            # Validate category
+            if not self._validate_category(args.category):
+                print(
+                    f"Error: Invalid category '{args.category}'. Allowed values are: {', '.join(sorted(self.VALID_CATEGORIES))}")
+                return
+
+            # Normalize category to lowercase
+            category = args.category.lower()
+
             old_category = dish['category']
-            dish['category'] = args.category
+            dish['category'] = category
             changes_made = True
-            change_details.append(f"Category: {old_category} → {args.category}")
+            change_details.append(f"Category: {old_category} → {category}")
 
         if changes_made:
             # Save the updated menu
