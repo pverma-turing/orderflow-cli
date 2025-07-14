@@ -63,6 +63,11 @@ class MenuCommand(Command):
             type=int,
             help='Maximum number of results to display'
         )
+        search_parser.add_argument(
+            '--json',
+            action='store_true',
+            help='Output search results as JSON'
+        )
 
     def execute(self, args):
         """Execute the menu command based on subcommand."""
@@ -277,6 +282,7 @@ class MenuCommand(Command):
         query = args.query.lower()
         category_filter = args.category.lower() if hasattr(args, 'category') and args.category else None
         limit = args.limit if hasattr(args, 'limit') and args.limit is not None else None
+        use_json = hasattr(args, 'json') and args.json
 
         # Validate limit if provided
         if limit is not None and limit <= 0:
@@ -302,9 +308,30 @@ class MenuCommand(Command):
 
         # No matching dishes found
         if not matching_dishes:
-            print("No matching dishes found.")
+            if use_json:
+                print("{}")
+            else:
+                print("No matching dishes found.")
             return
 
+        # Apply limit to the matching dishes if needed
+        if limit is not None and limit < len(matching_dishes):
+            # For JSON output with limit, we need to slice the dictionary
+            limited_dishes = {}
+            count = 0
+            for dish_name, details in matching_dishes.items():
+                if count >= limit:
+                    break
+                limited_dishes[dish_name] = details
+                count += 1
+            matching_dishes = limited_dishes
+
+        # JSON output mode
+        if use_json:
+            print(json.dumps(matching_dishes))
+            return
+
+        # Standard formatted output from here
         # Build search description for header
         search_desc = f"'{args.query}'"
         if category_filter:
@@ -332,7 +359,7 @@ class MenuCommand(Command):
 
         for category, dishes in sorted(by_category.items()):
             for dish_name, price in sorted(dishes):
-                # Check if we've reached the limit
+                # For text output, limit is handled here during display
                 if limit is not None and displayed_count >= limit:
                     break
 
@@ -346,7 +373,7 @@ class MenuCommand(Command):
         print("=" * 60)
 
         # Show result count, noting if limited
-        if limit is not None and len(matching_dishes) > limit:
+        if limit is not None and len(matching_dishes) > displayed_count:
             print(f"Found {len(matching_dishes)} matching dishes (showing first {limit})")
         else:
             print(f"Found {len(matching_dishes)} matching dishes")
