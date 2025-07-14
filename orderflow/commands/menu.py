@@ -1,3 +1,6 @@
+import json
+import os
+
 from orderflow.commands.base import Command
 
 
@@ -11,6 +14,9 @@ class MenuCommand(Command):
 
     def add_arguments(self, parser):
         """Add menu-specific command arguments."""
+        # Add restaurant flag to the main menu parser
+        parser.add_argument('--restaurant', required=True, help='Restaurant ID')
+
         # Create subparsers for menu subcommands
         subparsers = parser.add_subparsers(dest='menu_action', help='Menu action')
 
@@ -35,6 +41,17 @@ class MenuCommand(Command):
 
     def execute(self, args):
         """Execute the menu command based on subcommand."""
+        self.current_restaurant = args.restaurant
+
+        # Check if restaurant exists
+        restaurant_dir = os.path.join('data', self.current_restaurant)
+        if not os.path.exists(restaurant_dir):
+            print(f"Error: Restaurant with ID '{self.current_restaurant}' does not exist.")
+            return
+
+        # Load menu from file
+        self._load_menu()
+
         if not hasattr(args, 'menu_action') or args.menu_action is None:
             print("Error: Please specify a menu action (add, remove, update, list)")
             return
@@ -47,6 +64,42 @@ class MenuCommand(Command):
             self._update_dish(args)
         elif args.menu_action == 'list':
             self._list_menu()
+
+    def _load_menu(self):
+        """Load menu from the restaurant's menu file."""
+        menu_path = self._get_menu_path()
+
+        # Reset menu items
+        self.menu_items = {}
+
+        # If file exists, load menu from it
+        if os.path.exists(menu_path):
+            try:
+                with open(menu_path, 'r') as f:
+                    self.menu_items = json.load(f)
+            except json.JSONDecodeError:
+                print(
+                    f"Failed to parse menu data for restaurant '{self.current_restaurant}'. Starting with empty menu.")
+            except Exception as e:
+                print(
+                    f"Failed to load menu for restaurant '{self.current_restaurant}': {str(e)}. Starting with empty menu.")
+
+    def _save_menu(self):
+        """Save menu to the restaurant's menu file."""
+        menu_path = self._get_menu_path()
+
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(menu_path), exist_ok=True)
+
+        try:
+            with open(menu_path, 'w') as f:
+                json.dump(self.menu_items, f, indent=2)
+        except Exception as e:
+            print(f"Could not save menu to disk: {str(e)}")
+
+    def _get_menu_path(self):
+        """Get the path to the menu file for the current restaurant."""
+        return os.path.join('data', self.current_restaurant, 'menu.json')
 
     def _add_dish(self, args):
         """Add a new dish to the menu."""
@@ -62,6 +115,9 @@ class MenuCommand(Command):
             'category': args.category
         }
 
+        # Save the updated menu
+        self._save_menu()
+
         print(f"Success: Added '{dish_name}' to the menu (Price: ₹{args.price}, Category: {args.category}).")
 
     def _remove_dish(self, args):
@@ -74,6 +130,9 @@ class MenuCommand(Command):
 
         # Remove the dish from the menu
         del self.menu_items[dish_name]
+
+        # Save the updated menu
+        self._save_menu()
 
         print(f"Success: Removed '{dish_name}' from the menu.")
 
@@ -104,6 +163,9 @@ class MenuCommand(Command):
             change_details.append(f"Category: {old_category} → {args.category}")
 
         if changes_made:
+            # Save the updated menu
+            self._save_menu()
+
             print(f"Success: Updated '{dish_name}' with the following changes:")
             for detail in change_details:
                 print(f"  - {detail}")
@@ -113,10 +175,10 @@ class MenuCommand(Command):
     def _list_menu(self):
         """List all dishes on the menu."""
         if not self.menu_items:
-            print("The menu is currently empty.")
+            print(f"The menu for restaurant '{self.current_restaurant}' is currently empty.")
             return
 
-        print("\nCurrent Menu:")
+        print(f"\nMenu for Restaurant: {self.current_restaurant}")
         print("=" * 60)
         print(f"{'Dish Name':<30} {'Category':<15} {'Price':>10}")
         print("-" * 60)
